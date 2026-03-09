@@ -8,6 +8,7 @@
  */
 
 import { MessageHandler } from '../types';
+import { ToolStateManager } from '../tools/state';
 
 export abstract class PlatformAdapter {
   protected messageHandler?: MessageHandler;
@@ -35,6 +36,17 @@ export abstract class PlatformAdapter {
     let full = '';
     for await (const chunk of stream) { full += chunk; }
     if (full) await this.sendMessage(sessionId, full);
+  }
+
+  /**
+   * 接收工具状态管理器（可选覆写）
+   *
+   * 由 Orchestrator 在 start() 时调用。
+   * 平台可监听 ToolStateManager 的事件以实时显示工具执行状态。
+   * 默认实现为空操作，不关心工具状态的平台无需覆写。
+   */
+  setToolStateManager(_manager: ToolStateManager): void {
+    // 默认不处理
   }
 
   /** 平台名称 */

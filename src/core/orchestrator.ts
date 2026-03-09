@@ -11,6 +11,7 @@ import { PlatformAdapter } from '../platforms/base';
 import { LLMProvider } from '../llm/providers/base';
 import { StorageProvider } from '../storage/base';
 import { ToolRegistry } from '../tools/registry';
+import { ToolStateManager } from '../tools/state';
 import { PromptAssembler } from '../prompt/assembler';
 import { createLogger } from '../logger';
 import {
@@ -33,6 +34,7 @@ export class Orchestrator {
   private llm: LLMProvider;
   private storage: StorageProvider;
   private tools: ToolRegistry;
+  private toolState: ToolStateManager;
   private prompt: PromptAssembler;
   private maxToolRounds: number;
   private stream: boolean;
@@ -42,6 +44,7 @@ export class Orchestrator {
     llm: LLMProvider,
     storage: StorageProvider,
     tools: ToolRegistry,
+    toolState: ToolStateManager,
     prompt: PromptAssembler,
     config?: OrchestratorConfig,
   ) {
@@ -49,6 +52,7 @@ export class Orchestrator {
     this.llm = llm;
     this.storage = storage;
     this.tools = tools;
+    this.toolState = toolState;
     this.prompt = prompt;
     this.maxToolRounds = config?.maxToolRounds ?? 10;
     this.stream = config?.stream ?? false;
@@ -69,6 +73,9 @@ export class Orchestrator {
         }
       }
     });
+
+    // 将工具状态管理器传递给平台（平台可选择监听以实时显示状态）
+    this.platform.setToolStateManager(this.toolState);
 
     await this.platform.start();
     const mode = this.stream ? '流式' : '非流式';
@@ -187,13 +194,30 @@ export class Orchestrator {
   private async executeTools(sessionId: string, functionCalls: FunctionCallPart[]): Promise<void> {
     const responseParts: FunctionResponsePart[] = [];
 
-    for (const call of functionCalls) {
-      logger.info(`执行工具: ${call.functionCall.name}`);
+    // 1. 为所有待执行的工具调用创建实例（初始状态 queued）
+    const invocations = functionCalls.map(call =>
+      this.toolState.create(
+        call.functionCall.name,
+        call.functionCall.args as Record<string, unknown>,
+        'queued',
+      ),
+    );
+
+    // 2. 逐个执行
+    for (let i = 0; i < functionCalls.length; i++) {
+      const call = functionCalls[i];
+      const invocation = invocations[i];
+
+      // 转为 executing
+      this.toolState.transition(invocation.id, 'executing');
+      logger.info(`执行工具: ${call.functionCall.name} (${invocation.id})`);
+
       try {
         const result = await this.tools.execute(
           call.functionCall.name,
           call.functionCall.args as Record<string, unknown>,
         );
+        this.toolState.transition(invocation.id, 'success', { result });
         responseParts.push({
           functionResponse: {
             name: call.functionCall.name,
@@ -202,7 +226,8 @@ export class Orchestrator {
         });
       } catch (err: unknown) {
         const errorMsg = err instanceof Error ? err.message : String(err);
-        logger.error(`工具执行失败: ${call.functionCall.name}:`, errorMsg);
+        this.toolState.transition(invocation.id, 'error', { error: errorMsg });
+        logger.error(`工具执行失败: ${call.functionCall.name} (${invocation.id}):`, errorMsg);
         responseParts.push({
           functionResponse: {
             name: call.functionCall.name,

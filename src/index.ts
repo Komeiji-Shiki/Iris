@@ -22,6 +22,7 @@ import { JsonFileStorage } from './storage/json-file';
 
 // 工具
 import { ToolRegistry } from './tools/registry';
+import { ToolStateManager } from './tools/state';
 import { getCurrentTime, calculator } from './tools/builtin/example';
 import { readFile } from './tools/builtin/read-file';
 import { searchReplace } from './tools/builtin/search-replace';
@@ -80,12 +81,15 @@ async function main() {
   const tools = new ToolRegistry();
   tools.registerAll([getCurrentTime, calculator, readFile, searchReplace, terminal, applyDiff]);
 
+  // ---- 4a. 创建工具状态管理器 ----
+  const toolState = new ToolStateManager();
+
   // ---- 5. 配置提示词 ----
   const prompt = new PromptAssembler();
   prompt.setSystemPrompt(config.system.systemPrompt || DEFAULT_SYSTEM_PROMPT);
 
   // ---- 6. 创建并启动协调器 ----
-  const orchestrator = new Orchestrator(platform, llm, storage, tools, prompt, {
+  const orchestrator = new Orchestrator(platform, llm, storage, tools, toolState, prompt, {
     maxToolRounds: config.system.maxToolRounds,
     stream: config.system.stream,
   });
