@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run:*)",
+      "Bash(npm install:*)",
+      "Bash(grep:*)",
+      "Bash(ls:*)",
+      "mcp__exa__web_search_exa",
+      "Bash(npx vue-tsc:*)",
+      "Bash(npx tsc:*)"
+    ]
+  }
+}

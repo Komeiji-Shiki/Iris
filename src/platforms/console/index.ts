@@ -87,6 +87,9 @@ export class ConsolePlatform extends PlatformAdapter {
         process.exit(0);
         break;
       case '/clear':
+        if (this.clearHandler) {
+          await this.clearHandler(this.sessionId);
+        }
         console.log('[Console] 会话已清空。');
         break;
       case '/help':

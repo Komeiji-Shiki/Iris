@@ -13,6 +13,10 @@ const DEFAULTS: Record<string, Partial<LLMConfig>> = {
     model: 'gpt-4o',
     baseUrl: 'https://api.openai.com',
   },
+  'claude': {
+    model: 'claude-sonnet-4-6',
+    baseUrl: 'https://api.anthropic.com',
+  },
 };
 
 export function parseLLMConfig(raw: any = {}): LLMConfig {

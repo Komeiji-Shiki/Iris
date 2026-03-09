@@ -28,10 +28,16 @@ platform:
   telegram:
     token: your-telegram-bot-token
 
+  web:
+    port: 3000
+    # 127.0.0.1 = 仅本机访问（配合 Nginx 反代使用，推荐）
+    # 0.0.0.0   = 允许所有网络接口访问（本地开发/无反代时使用）
+    host: 127.0.0.1
+
 # 存储配置
 storage:
   # 类型: json-file
- type: json-file
+  type: json-file
 
   # 会话数据目录
   dir: ./data/sessions
@@ -46,3 +52,13 @@ system:
 
   # 流式输出
   stream: true
+
+# 记忆配置（可选）
+# memory:
+#   enabled: true
+#   dbPath: ./data/memory.db
+
+# Cloudflare 管理（可选，通过 Web GUI 配置）
+# cloudflare:
+#   apiToken: your-cloudflare-api-token
+#   zoneId: auto  # 自动检测，或填具体 zone ID

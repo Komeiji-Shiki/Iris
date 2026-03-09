@@ -1,6 +1,8 @@
 node_modules/
 dist/
 data/
+web-ui/dist/
+web-ui/node_modules/
 *.log
 
 # 配置文件（含密钥）

@@ -13,8 +13,9 @@ import { parseLLMConfig } from './llm';
 import { parsePlatformConfig } from './platform';
 import { parseStorageConfig } from './storage';
 import { parseSystemConfig } from './system';
+import { parseMemoryConfig } from './memory';
 
-export type { AppConfig, LLMConfig, PlatformConfig, StorageConfig, SystemConfig } from './types';
+export type { AppConfig, LLMConfig, PlatformConfig, StorageConfig, SystemConfig, MemoryConfig, CloudflareConfig } from './types';
 
 /** 配置文件搜索顺序 */
 const CONFIG_PATHS = [
@@ -23,7 +24,7 @@ const CONFIG_PATHS = [
 ];
 
 /** 查找配置文件 */
-function findConfigFile(): string {
+export function findConfigFile(): string {
   for (const name of CONFIG_PATHS) {
     const full = path.resolve(process.cwd(), name);
     if (fs.existsSync(full)) return full;
@@ -32,6 +33,15 @@ function findConfigFile(): string {
     `未找到配置文件。请复制 config.example.yaml 为 config.yaml 并填入实际值。\n` +
     `搜索路径: ${CONFIG_PATHS.join(', ')}`,
   );
+}
+
+/** 解析可选的 Cloudflare 配置 */
+function parseCloudflareConfig(data: any) {
+  if (!data) return undefined;
+  return {
+    apiToken: data.apiToken || '',
+    zoneId: data.zoneId || '',
+  };
 }
 
 /** 从 config.yaml 加载配置 */
@@ -45,5 +55,7 @@ export function loadConfig(): AppConfig {
     platform: parsePlatformConfig(data.platform),
     storage: parseStorageConfig(data.storage),
     system: parseSystemConfig(data.system),
+    memory: parseMemoryConfig(data.memory),
+    cloudflare: parseCloudflareConfig(data.cloudflare),
   };
 }

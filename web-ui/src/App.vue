@@ -1,0 +1,62 @@
+<template>
+  <div class="app-root">
+    <div class="app-background" aria-hidden="true">
+      <div class="app-glow glow-primary"></div>
+      <div class="app-glow glow-secondary"></div>
+      <div class="app-grid"></div>
+    </div>
+
+    <AppSidebar
+      :mobile-open="sidebarOpen"
+      @toggle="sidebarOpen = false"
+      @open-settings="handleOpenSettings"
+    />
+
+    <div class="app-main">
+      <button
+        class="toggle-sidebar"
+        type="button"
+        :aria-expanded="sidebarOpen"
+        aria-label="切换会话侧边栏"
+        @click="sidebarOpen = !sidebarOpen"
+      >
+        <span class="toggle-sidebar-icon">☰</span>
+        <span class="toggle-sidebar-text">会话</span>
+      </button>
+
+      <Transition name="fade-veil">
+        <button
+          v-if="sidebarOpen"
+          class="sidebar-backdrop"
+          type="button"
+          aria-label="关闭侧边栏"
+          @click="sidebarOpen = false"
+        ></button>
+      </Transition>
+
+      <router-view v-slot="{ Component, route }">
+        <Transition name="view-fade" mode="out-in">
+          <component :is="Component" :key="route.fullPath" />
+        </Transition>
+      </router-view>
+    </div>
+
+    <Transition name="panel-modal">
+      <SettingsPanel v-if="settingsOpen" @close="settingsOpen = false" />
+    </Transition>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref } from 'vue'
+import AppSidebar from './components/AppSidebar.vue'
+import SettingsPanel from './components/SettingsPanel.vue'
+
+const sidebarOpen = ref(false)
+const settingsOpen = ref(false)
+
+function handleOpenSettings() {
+  settingsOpen.value = true
+  sidebarOpen.value = false
+}
+</script>

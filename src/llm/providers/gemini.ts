@@ -19,9 +19,9 @@ export function createGeminiProvider(config: GeminiProviderConfig): LLMProvider 
   return new LLMProvider(
     new GeminiFormat(),
     {
-      url: `${baseUrl}/v1beta/models/${model}:generateContent?key=${key}`,
-      streamUrl: `${baseUrl}/v1beta/models/${model}:streamGenerateContent?key=${key}&alt=sse`,
-      headers: {},
+      url: `${baseUrl}/v1beta/models/${model}:generateContent`,
+      streamUrl: `${baseUrl}/v1beta/models/${model}:streamGenerateContent?alt=sse`,
+      headers: { 'x-goog-api-key': key },
     },
     'Gemini',
   );

@@ -189,7 +189,7 @@ export const applyDiff: ToolDefinition = {
     // 安全检查
     const resolved = path.resolve(filePath);
     const cwd = process.cwd();
-    if (!resolved.startsWith(cwd)) {
+    if (resolved !== cwd && !resolved.startsWith(cwd + path.sep)) {
       throw new Error(`路径超出项目目录: ${filePath}`);
     }
 

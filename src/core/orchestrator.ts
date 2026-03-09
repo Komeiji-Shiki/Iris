@@ -12,6 +12,7 @@ import { LLMProvider } from '../llm/providers/base';
 import { StorageProvider } from '../storage/base';
 import { ToolRegistry } from '../tools/registry';
 import { PromptAssembler } from '../prompt/assembler';
+import { MemoryProvider } from '../memory/base';
 import { createLogger } from '../logger';
 import {
   Content, Part, LLMRequest, UsageMetadata,
@@ -36,6 +37,7 @@ export class Orchestrator {
   private prompt: PromptAssembler;
   private maxToolRounds: number;
   private stream: boolean;
+  private memory?: MemoryProvider;
 
   constructor(
     platform: PlatformAdapter,
@@ -44,6 +46,7 @@ export class Orchestrator {
     tools: ToolRegistry,
     prompt: PromptAssembler,
     config?: OrchestratorConfig,
+    memory?: MemoryProvider,
   ) {
     this.platform = platform;
     this.llm = llm;
@@ -52,6 +55,7 @@ export class Orchestrator {
     this.prompt = prompt;
     this.maxToolRounds = config?.maxToolRounds ?? 10;
     this.stream = config?.stream ?? false;
+    this.memory = memory;
   }
 
   /** 启动：注册消息回调并启动平台 */
@@ -68,6 +72,10 @@ export class Orchestrator {
           // 发送错误消息也失败，只记录日志
         }
       }
+    });
+
+    this.platform.onClear(async (sessionId) => {
+      await this.storage.clearHistory(sessionId);
     });
 
     await this.platform.start();
@@ -87,6 +95,20 @@ export class Orchestrator {
     // 1. 存储用户消息
     await this.storage.addMessage(sessionId, { role: 'user', parts: userParts });
 
+    // 1.5 查询相关记忆（per-request，不修改共享状态）
+    let extraParts: Part[] | undefined;
+    if (this.memory) {
+      try {
+        const userText = userParts.filter(isTextPart).map(p => p.text).join('');
+        const context = await this.memory.buildContext(userText);
+        if (context) {
+          extraParts = [{ text: context }];
+        }
+      } catch (err) {
+        logger.warn('查询记忆失败:', err);
+      }
+    }
+
     // 2. LLM 对话 + 工具执行循环
     let rounds = 0;
     while (rounds < this.maxToolRounds) {
@@ -94,7 +116,7 @@ export class Orchestrator {
 
       // 2a. 获取历史并组装请求
       const history = await this.storage.getHistory(sessionId);
-      const request = this.prompt.assemble(history, this.tools.getDeclarations());
+      const request = this.prompt.assemble(history, this.tools.getDeclarations(), undefined, extraParts);
 
       // 2b. 调用 LLM（流式或非流式）
       let modelContent: Content;
@@ -119,15 +141,20 @@ export class Orchestrator {
       const functionCalls = modelContent.parts.filter(isFunctionCallPart);
 
       if (functionCalls.length === 0) {
-        // 无工具调用，发送文本给用户（流式已在 callLLMStream 中发送）
         if (!textAlreadySent) {
-          const text = modelContent.parts.filter(isTextPart).map(p =>p.text).join('');
+          const text = modelContent.parts.filter(isTextPart).map(p => p.text).join('');
           if (text) await this.platform.sendMessage(sessionId, text);
         }
         return;
       }
 
-      // 2e. 执行工具
+      // 2e. 发送伴随工具调用的文本（流式模式已在 callLLMStream 中处理）
+      if (!textAlreadySent) {
+        const text = modelContent.parts.filter(isTextPart).map(p => p.text).join('');
+        if (text) await this.platform.sendMessage(sessionId, text);
+      }
+
+      // 2f. 执行工具
       await this.executeTools(sessionId, functionCalls);
     }
 

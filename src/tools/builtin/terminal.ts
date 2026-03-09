@@ -58,7 +58,7 @@ export const terminal: ToolDefinition = {
     const workDir = cwd ? path.resolve(projectRoot, cwd) : projectRoot;
 
     // 安全检查
-    if (!workDir.startsWith(projectRoot)) {
+    if (workDir !== projectRoot && !workDir.startsWith(projectRoot + path.sep)) {
       throw new Error(`工作目录超出项目范围: ${cwd}`);
     }
 

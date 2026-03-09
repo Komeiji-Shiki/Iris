@@ -20,7 +20,6 @@ const TEXT_EXTENSIONS = new Set([
   '.yml', '.yaml', '.toml', '.ini', '.cfg', '.conf',
   '.xml', '.svg',
   '.csv', '.tsv', '.log',
-  '.env', '.env.example', '.env.local',
   '.gitignore', '.dockerignore', '.editorconfig',
   '.sql',
   '',  // 无扩展名文件（如 Makefile、Dockerfile）
@@ -37,6 +36,7 @@ function isTextFile(filePath: string): boolean {
   const ext = path.extname(filePath).toLowerCase();
   if (TEXT_EXTENSIONS.has(ext)) return true;
   const basename = path.basename(filePath);
+  if (basename.startsWith('.env')) return true;
   return TEXT_FILENAMES.has(basename);
 }
 
@@ -85,7 +85,7 @@ export const readFile: ToolDefinition = {
     // 安全检查：禁止路径穿越
     const resolved = path.resolve(filePath);
     const cwd = process.cwd();
-    if (!resolved.startsWith(cwd)) {
+    if (resolved !== cwd && !resolved.startsWith(cwd + path.sep)) {
       throw new Error(`路径超出项目目录: ${filePath}`);
     }
 
