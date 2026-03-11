@@ -16,9 +16,9 @@ export interface OpenAIResponsesProviderConfig {
 }
 
 export function createOpenAIResponsesProvider(config: OpenAIResponsesProviderConfig): LLMProvider {
-  const baseUrl = config.baseUrl || 'https://api.openai.com';
+  const baseUrl = (config.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
   // OpenAI Responses API 路径
-  const url = `${baseUrl.replace(/\/+$/, '')}/v1/responses`;
+  const url = `${baseUrl}/responses`;
 
   return new LLMProvider(
     new OpenAIResponsesFormat(config.model),

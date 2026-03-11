@@ -15,12 +15,12 @@ export interface ClaudeProviderConfig {
 
 export function createClaudeProvider(config: ClaudeProviderConfig): LLMProvider {
   const model = config.model || 'claude-sonnet-4-6';
-  const baseUrl = config.baseUrl || 'https://api.anthropic.com';
+  const baseUrl = (config.baseUrl || 'https://api.anthropic.com/v1').replace(/\/+$/, '');
 
   return new LLMProvider(
     new ClaudeFormat(model),
     {
-      url: `${baseUrl}/v1/messages`,
+      url: `${baseUrl}/messages`,
       headers: {
         'x-api-key': config.apiKey,
         'anthropic-version': '2023-06-01',

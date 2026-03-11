@@ -17,12 +17,12 @@ export interface OpenAICompatibleProviderConfig {
 
 export function createOpenAICompatibleProvider(config: OpenAICompatibleProviderConfig): LLMProvider {
   const model = config.model || 'gpt-4o';
-  const baseUrl = config.baseUrl || 'https://api.openai.com';
+  const baseUrl = (config.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
 
   return new LLMProvider(
     new OpenAICompatibleFormat(model),
     {
-      url: `${baseUrl}/v1/chat/completions`,
+      url: `${baseUrl}/chat/completions`,
       headers: { 'Authorization': `Bearer ${config.apiKey}`, ...config.headers },
     },
     'OpenAICompatible',

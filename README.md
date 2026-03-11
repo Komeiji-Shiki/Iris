@@ -56,7 +56,23 @@ primary:
   provider: gemini
   apiKey: your-api-key-here
   model: gemini-2.0-flash
-  baseUrl: https://generativelanguage.googleapis.com
+  baseUrl: https://generativelanguage.googleapis.com/v1beta
+```
+
+`baseUrl` 规则：
+
+- Gemini：以 `/v1beta` 结尾
+- OpenAI 兼容、OpenAI Responses、Claude：以 `/v1` 结尾
+- 程序会在这个地址后继续补全具体接口路径
+
+例如 OpenAI Responses：
+
+```yaml
+primary:
+  provider: openai-responses
+  apiKey: your-api-key-here
+  model: gpt-4o
+  baseUrl: https://api.openai.com/v1
 ```
 
 #### `data/configs/platform.yaml`
