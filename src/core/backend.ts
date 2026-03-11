@@ -185,6 +185,8 @@ export class Backend extends EventEmitter {
       const errorMsg = err instanceof Error ? err.message : String(err);
       logger.error(`处理消息失败 (session=${sessionId}):`, err);
       this.emit('error', sessionId, errorMsg);
+    } finally {
+      this.activeSessionId = undefined;
     }
   }
 
