@@ -40,6 +40,7 @@
                   <select v-model="tiers.primary.provider">
                     <option value="gemini">Gemini</option>
                     <option value="openai-compatible">OpenAI 兼容</option>
+                    <option value="openai-responses">OpenAI Responses</option>
                     <option value="claude">Claude</option>
                   </select>
                 </div>
@@ -78,6 +79,7 @@
                   <select v-model="tiers.secondary.provider">
                     <option value="gemini">Gemini</option>
                     <option value="openai-compatible">OpenAI 兼容</option>
+                    <option value="openai-responses">OpenAI Responses</option>
                     <option value="claude">Claude</option>
                   </select>
                 </div>
@@ -116,6 +118,7 @@
                   <select v-model="tiers.light.provider">
                     <option value="gemini">Gemini</option>
                     <option value="openai-compatible">OpenAI 兼容</option>
+                    <option value="openai-responses">OpenAI Responses</option>
                     <option value="claude">Claude</option>
                   </select>
                 </div>
@@ -496,10 +499,11 @@ const tierOpen = reactive({ primary: true, secondary: false, light: false })
 let configLoaded = false
 
 /** Provider 默认值，与 src/config/llm.ts DEFAULTS 保持一致 */
-const : Record<string, { model: string; baseUrl: string }> = {
-  'gemini': { model: 'gemini-2.0-flash', baseUrl: 'https://generativelanguage.googleapis.com' },
-  'openai-compatible': { model: 'gpt-4o', baseUrl: 'https://api.openai.com' },
-  'claude': { model: 'claude-sonnet-4-6', baseUrl: 'https://api.anthropic.com' },
+const PROVIDER_DEFAULTS: Record<string, { model: string; baseUrl: string }> = {
+  'gemini': { model: 'gemini-2.0-flash', baseUrl: 'https://generativelanguage.googleapis.com/v1beta' },
+  'openai-compatible': { model: 'gpt-4o', baseUrl: 'https://api.openai.com/v1' },
+  'openai-responses': { model: 'gpt-4o', baseUrl: 'https://api.openai.com/v1' },
+  'claude': { model: 'claude-sonnet-4-6', baseUrl: 'https://api.anthropic.com/v1' },
 }
 
 /** 切换 Provider 时自动填充默认值（仅在用户手动操作时生效） */
@@ -507,8 +511,8 @@ function watchTierProvider(tier: TierConfig) {
   watch(() => tier.provider, (newProvider, oldProvider) => {
     if (!configLoaded) return
     if (newProvider === oldProvider) return
-    const oldDefaults = [oldProvider] ?? { model: '', baseUrl: '' }
-    const newDefaults = [newProvider] ?? { model: '', baseUrl: '' }
+    const oldDefaults = PROVIDER_DEFAULTS[oldProvider] ?? { model: '', baseUrl: '' }
+    const newDefaults = PROVIDER_DEFAULTS[newProvider] ?? { model: '', baseUrl: '' }
     if (!tier.model || tier.model === oldDefaults.model) tier.model = newDefaults.model
     if (!tier.baseUrl || tier.baseUrl === oldDefaults.baseUrl) tier.baseUrl = newDefaults.baseUrl
     if (tier.apiKey.startsWith('****')) tier.apiKey = ''

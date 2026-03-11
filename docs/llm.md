@@ -13,6 +13,7 @@ src/llm/
 │   ├── types.ts                # FormatAdapter 接口定义
 │   ├── gemini.ts               # Gemini 格式（请求直通，响应提取）
 │   ├── openai-compatible.ts    # OpenAI 格式（完整双向转换）
+│   ├── openai-responses.ts     # OpenAI Responses 格式（完整双向转换）
 │   └── claude.ts               # Claude 格式（完整双向转换）
 ├── transport.ts                # HTTP 请求模块（通用 fetch 发送）
 ├── response.ts                 # 响应后处理（流式 / 非流式统一处理）
@@ -20,6 +21,7 @@ src/llm/
 │   ├── base.ts                 # LLMProvider 组合器
 │   ├── gemini.ts               # createGeminiProvider()
 │   ├── openai-compatible.ts    # createOpenAICompatibleProvider()
+│   ├── openai-responses.ts     # createOpenAIResponsesProvider()
 │   └── claude.ts               # createClaudeProvider()
 ```
 
@@ -111,6 +113,8 @@ LLMRequest (Gemini 格式)
 - OpenAI/Claude 的 tool_call 有 ID，Gemini 没有。转换时需生成/匹配 ID。
 - Gemini 格式请求直通，无需转换。
 - Gemini 流式使用不同 URL (`streamGenerateContent?alt=sse`)，OpenAI/Claude 用同一 URL 加 `stream:true` 参数。
+- `baseUrl` 约定为带版本前缀的地址：Gemini 以 `/v1beta` 结尾；OpenAI 兼容、OpenAI Responses、Claude 以 `/v1` 结尾。
+- Provider 会在 `baseUrl` 后继续补全具体接口路径，例如 Gemini 补 `/models/{model}:generateContent`，OpenAI Responses 补 `/responses`。
 - OpenAI 流式中工具调用参数分片到达，通过 StreamDecodeState 累积。
 - Claude 的 `stop_reason` 映射：`tool_use` → 有工具调用，`end_turn` → 正常结束。
 - 支持 Gemini 的 `thoughtSignature` 字段，流式接收后附加到 text part 和 function call parts。

@@ -29,7 +29,13 @@ llm:
     provider: gemini
     apiKey: your-api-key
     model: gemini-2.0-flash
-    baseUrl: https://generativelanguage.googleapis.com
+    baseUrl: https://generativelanguage.googleapis.com/v1beta
+
+  # secondary:
+  #   provider: openai-compatible
+  #   apiKey: your-api-key
+  #   model: gpt-4o
+  #   baseUrl: https://api.openai.com/v1
 
 platform:
   type: web
@@ -58,6 +64,20 @@ system:
 #   # apiTokenEnv: IRIS_CF_API_TOKEN
 #   # apiTokenFile: ./data/secrets/cloudflare.token
 #   zoneId: auto
+```
+
+说明：
+
+- Gemini 的 `baseUrl` 要以 `/v1beta` 结尾，例如 `https://generativelanguage.googleapis.com/v1beta`
+- OpenAI 兼容、OpenAI Responses、Claude 的 `baseUrl` 要以 `/v1` 结尾
+- 在 `baseUrl` 之后，程序再补全具体接口路径
+- OpenAI Responses 的示例：
+
+```yaml
+provider: openai-responses
+apiKey: your-api-key
+model: gpt-4o
+baseUrl: https://api.openai.com/v1
 ```
 
 ---

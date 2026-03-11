@@ -84,6 +84,7 @@ export class GeminiFormat implements FormatAdapter {
           chunk.partsDelta.push(rawPart);
         }
         if ('functionCall' in part) {
+          if (!chunk.partsDelta) chunk.partsDelta = [];
           if (!chunk.functionCalls) chunk.functionCalls = [];
           chunk.functionCalls.push(part);
           chunk.partsDelta.push(part);
