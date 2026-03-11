@@ -10,9 +10,10 @@ import { FormatAdapter, StreamDecodeState } from './types';
 
 export class GeminiFormat implements FormatAdapter {
 
-  /** 请求直通，无需转换 */
+  /** 请求直通，但过滤内部字段 */
   encodeRequest(request: LLMRequest, _stream?: boolean): unknown {
-    return request;
+    // 深拷贝请求并过滤内部字段
+    return filterInternalFields(request);
   }
 
   /** 从 Gemini API 响应中提取 content、finishReason、usageMetadata */
@@ -67,4 +68,28 @@ export class GeminiFormat implements FormatAdapter {
   createStreamState(): StreamDecodeState {
     return {};
   }
+}
+
+/** 过滤内部字段，防止发送到外部 API */
+function filterInternalFields(obj: unknown): unknown {
+  if (obj === null || obj === undefined || typeof obj !== 'object') {
+    return obj;
+  }
+
+  // 处理数组
+  if (Array.isArray(obj)) {
+    return obj.map(filterInternalFields);
+  }
+
+  // 处理对象
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+    // 跳过内部字段
+    if (key === 'durationMs' || key === 'streamOutputDurationMs' || key === 'thoughtDurationMs' || key === 'usageMetadata') {
+      continue;
+    }
+    // 递归处理嵌套对象
+    result[key] = filterInternalFields(value);
+  }
+  return result;
 }

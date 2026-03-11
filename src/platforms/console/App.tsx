@@ -128,6 +128,7 @@ export function App({ onReady, onSubmit, onNewSession, onLoadSession, onListSess
   const [streamingParts, setStreamingParts] = useState<MessagePart[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [generatingTime, setGeneratingTime] = useState(0);
   const [contextTokens, setContextTokens] = useState(0);
   const [viewMode, setViewMode] = useState<ViewMode>('chat');
   const [sessionList, setSessionList] = useState<SessionMeta[]>([]);
@@ -136,6 +137,22 @@ export function App({ onReady, onSubmit, onNewSession, onLoadSession, onListSess
 
   const streamPartsRef = useRef<MessagePart[]>([]);
   const toolInvocationsRef = useRef<ToolInvocation[]>([]);
+  const generatingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const startTimer = useCallback(() => {
+    setGeneratingTime(0);
+    if (generatingTimerRef.current) clearInterval(generatingTimerRef.current);
+    generatingTimerRef.current = setInterval(() => {
+      setGeneratingTime(t => +(t + 0.1).toFixed(1));
+    }, 100);
+  }, []);
+
+  const stopTimer = useCallback(() => {
+    if (generatingTimerRef.current) {
+      clearInterval(generatingTimerRef.current);
+      generatingTimerRef.current = null;
+    }
+  }, []);
   const throttleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingCommittedStreamPartsRef = useRef(0);
   const lastUsageRef = useRef<UsageMetadata | null>(null);
@@ -238,6 +255,11 @@ export function App({ onReady, onSubmit, onNewSession, onLoadSession, onListSess
 
       setGenerating(generating) {
         setIsGenerating(generating);
+        if (generating) {
+          startTimer();
+        } else {
+          stopTimer();
+        }
       },
 
       clearMessages() {
@@ -275,7 +297,7 @@ export function App({ onReady, onSubmit, onNewSession, onLoadSession, onListSess
       },
     };
     onReady(handle);
-  }, [onReady]);
+  }, [onReady, startTimer, stopTimer]);
 
   // ============ 命令处理 ============
 
@@ -414,6 +436,7 @@ export function App({ onReady, onSubmit, onNewSession, onLoadSession, onListSess
             msg={activeMessage}
             liveParts={streamingParts.length > 0 ? streamingParts : undefined}
             isStreaming={isStreaming}
+            generatingTime={generatingTime}
           />
         )}
         {isGenerating && !lastIsActiveAssistant && !activeMessage && (
@@ -421,6 +444,7 @@ export function App({ onReady, onSubmit, onNewSession, onLoadSession, onListSess
             msg={{ id: 'tmp', role: 'assistant', parts: [] }}
             liveParts={streamingParts.length > 0 ? streamingParts : undefined}
             isStreaming={isStreaming}
+            generatingTime={generatingTime}
           />
         )}
       </Box>
