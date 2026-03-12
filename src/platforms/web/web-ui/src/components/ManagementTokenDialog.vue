@@ -6,7 +6,7 @@
           <div class="settings-title-group">
             <span class="settings-kicker">Access Credentials</span>
             <h2>访问凭证</h2>
-            <p>统一管理 Web GUI 所需的访问令牌。所有令牌仅保存在当前浏览器本地，不会自动同步到服务端。</p>
+            <p>统一管理 Web GUI 所需的访问令牌。它们不同于设置中心里的模型 API Key，仅用于当前浏览器访问 Iris Web 接口。所有令牌仅保存在当前浏览器本地，不会自动同步到服务端。</p>
           </div>
           <button class="btn-close" type="button" aria-label="关闭" @click="emit('close')">
             <AppIcon :name="ICONS.common.close" />
@@ -18,7 +18,7 @@
             <div class="settings-section-head">
               <div>
                 <h3>全局 API 访问令牌</h3>
-                <p>对应后端 `platform.web.authToken`。保存后会自动作为 <code>Authorization: Bearer ...</code> 附加到所有 API 请求。</p>
+                <p>对应后端 `platform.web.authToken`。保存后会自动作为 <code>Authorization: Bearer ...</code> 附加到所有 API 请求；这不是模型供应商的 API Key。</p>
               </div>
               <span class="settings-pill">{{ hasAuthToken ? '已保存' : '未保存' }}</span>
             </div>
@@ -45,7 +45,7 @@
             <div class="settings-section-head">
               <div>
                 <h3>管理令牌</h3>
-                <p>用于访问配置、部署、Cloudflare 等管理接口，请填写服务端 `platform.web.managementToken`。</p>
+                <p>用于访问配置、部署、Cloudflare 等管理接口，请填写服务端 `platform.web.managementToken`；这同样不是模型供应商的 API Key。</p>
               </div>
               <span class="settings-pill">{{ hasManagementToken ? '已保存' : '未保存' }}</span>
             </div>

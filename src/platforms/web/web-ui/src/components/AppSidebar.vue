@@ -35,7 +35,36 @@
       <div class="session-list" v-if="route.path === '/'">
         <div class="sidebar-section-label">会话列表</div>
 
-        <div class="sidebar-empty" v-if="sessions.length === 0">
+        <div v-if="sessionActionError" class="sidebar-inline-status error">
+          <span>{{ sessionActionError }}</span>
+          <button class="sidebar-inline-action" type="button" @click="clearSessionActionError">
+            知道了
+          </button>
+        </div>
+
+        <div v-if="sessionsError && sessions.length > 0" class="sidebar-inline-status error">
+          <span>会话刷新失败：{{ sessionsError }}</span>
+          <button class="sidebar-inline-action" type="button" :disabled="sessionsLoading" @click="handleReloadSessions">
+            重试
+          </button>
+        </div>
+
+        <div class="sidebar-empty sidebar-empty-error" v-if="sessionsError && sessions.length === 0 && !sessionsLoading">
+          <span class="sidebar-empty-icon"><AppIcon :name="ICONS.status.warn" /></span>
+          <p>会话加载失败</p>
+          <span>{{ sessionsError }}</span>
+          <button class="sidebar-inline-action" type="button" @click="handleReloadSessions">
+            重新加载
+          </button>
+        </div>
+
+        <div class="sidebar-empty" v-else-if="sessionsLoading && sessions.length === 0">
+          <span class="sidebar-empty-icon"><AppIcon :name="ICONS.status.loading" /></span>
+          <p>正在加载会话</p>
+          <span>稍候片刻，Iris 正在同步你的工作记录。</span>
+        </div>
+
+        <div class="sidebar-empty" v-else-if="sessions.length === 0">
           <span class="sidebar-empty-icon"><AppIcon :name="ICONS.sidebar.empty" /></span>
           <p>暂无会话</p>
           <span>点击“新建会话”开始第一次对话。</span>
@@ -82,8 +111,9 @@
         <span class="status-dot" :style="{ background: accessStateColor }"></span>
         <div class="status-copy">
           <span class="status-label">访问凭证</span>
-          <span class="status-value">API 访问令牌：{{ authReady ? '已保存' : '未保存（如启用了 platform.web.authToken 请先录入）' }}</span>
-          <span class="status-value">管理令牌：{{ managementReady ? '已保存' : '未保存（管理接口可能返回 401）' }}</span>
+          <span class="status-value">API 访问令牌：{{ authCredentialStatus }}</span>
+          <span class="status-value">管理令牌：{{ managementCredentialStatus }}</span>
+          <span class="status-value">提示：{{ accessCredentialHint }}</span>
         </div>
       </div>
 
@@ -106,6 +136,8 @@ import { useRoute, useRouter } from 'vue-router'
 import AppIcon from './AppIcon.vue'
 import { ICONS } from '../constants/icons'
 import { useSessions } from '../composables/useSessions'
+import { getStatus } from '../api/client'
+import type { StatusInfo } from '../api/types'
 import { loadManagementToken, subscribeManagementTokenChange } from '../utils/managementToken'
 import { loadAuthToken, subscribeAuthTokenChange } from '../utils/authToken'
 
@@ -121,17 +153,75 @@ const emit = defineEmits<{
 
 const route = useRoute()
 const router = useRouter()
-const { sessions, currentSessionId, loadSessions, newChat, switchSession, removeSession } = useSessions()
+const {
+  sessions,
+  currentSessionId,
+  sessionsLoading,
+  sessionsError,
+  loadSessions,
+  newChat,
+  switchSession,
+  removeSession,
+} = useSessions()
 
 const deletingSessionId = ref<string | null>(null)
+const sessionActionError = ref('')
 const managementReady = ref(false)
 const authReady = ref(false)
+const authProtected = ref<boolean | null>(null)
+const managementProtected = ref<boolean | null>(null)
+const accessRequirementLoaded = ref(false)
+const accessRequirementError = ref('')
+
+function hasMissingRequiredCredential(): boolean {
+  return (authProtected.value === true && !authReady.value)
+    || (managementProtected.value === true && !managementReady.value)
+}
 
 const accessStateColor = computed(() => {
+  if (accessRequirementLoaded.value) {
+    return hasMissingRequiredCredential() ? 'var(--error)' : 'var(--success)'
+  }
   if (authReady.value || managementReady.value) {
     return 'var(--success)'
   }
-  return 'var(--error)'
+  return 'var(--accent-cyan, var(--accent))'
+})
+
+const authCredentialStatus = computed(() => describeCredentialStatus(
+  authProtected.value,
+  authReady.value,
+  'platform.web.authToken',
+))
+
+const managementCredentialStatus = computed(() => describeCredentialStatus(
+  managementProtected.value,
+  managementReady.value,
+  'platform.web.managementToken',
+))
+
+const accessCredentialHint = computed(() => {
+  if (accessRequirementLoaded.value) {
+    if (!authProtected.value && !managementProtected.value) {
+      return '这是 Web GUI 访问凭证，不是模型 API Key。当前后端未启用这两项。'
+    }
+
+    const missing: string[] = []
+    if (authProtected.value && !authReady.value) missing.push('API 访问令牌')
+    if (managementProtected.value && !managementReady.value) missing.push('管理令牌')
+
+    if (missing.length > 0) {
+      return `这是 Web GUI 访问凭证，不是模型 API Key。当前后端要求先录入${missing.join('、')}。`
+    }
+
+    return '这是 Web GUI 访问凭证，不是模型 API Key。当前所需凭证已就绪。'
+  }
+
+  if (accessRequirementError.value) {
+    return '这是 Web GUI 访问凭证，不是模型 API Key。暂未检测到后端是否启用，如接口返回 401 再录入。'
+  }
+
+  return '这是 Web GUI 访问凭证，不是模型 API Key。正在检测后端是否启用。'
 })
 
 let unsubscribeManagementToken: (() => void) | null = null
@@ -140,6 +230,42 @@ let unsubscribeAuthToken: (() => void) | null = null
 function refreshAccessState() {
   managementReady.value = !!loadManagementToken().trim()
   authReady.value = !!loadAuthToken().trim()
+}
+
+function applyAccessRequirements(status: StatusInfo) {
+  authProtected.value = !!status.authProtected
+  managementProtected.value = !!status.managementProtected
+  accessRequirementLoaded.value = true
+  accessRequirementError.value = ''
+}
+
+async function loadAccessRequirements() {
+  try {
+    const status = await getStatus()
+    applyAccessRequirements(status)
+  } catch (err) {
+    authProtected.value = null
+    managementProtected.value = null
+    accessRequirementLoaded.value = false
+    accessRequirementError.value = err instanceof Error ? err.message : '未知错误'
+  }
+}
+
+function handleCredentialStorageChange() {
+  refreshAccessState()
+  void loadAccessRequirements()
+}
+
+function describeCredentialStatus(protectedFlag: boolean | null, ready: boolean, configKey: string): string {
+  if (protectedFlag === true) {
+    return ready ? '已保存（后端要求）' : `需要录入（后端已启用 ${configKey}）`
+  }
+
+  if (protectedFlag === false) {
+    return ready ? '已保存（当前后端未要求，可保留）' : '未启用（当前后端未要求）'
+  }
+
+  return ready ? '已保存（后端要求状态未检测）' : '状态未知（尚未检测后端是否启用）'
 }
 
 function formatSessionTime(updatedAt?: string): string {
@@ -154,13 +280,24 @@ function formatSessionTime(updatedAt?: string): string {
   }).format(date)
 }
 
+async function handleReloadSessions() {
+  sessionActionError.value = ''
+  await loadSessions()
+}
+
+function clearSessionActionError() {
+  sessionActionError.value = ''
+}
+
 async function handleNewChat() {
+  sessionActionError.value = ''
   if (route.path !== '/') await router.push('/')
   newChat()
   emit('toggle')
 }
 
 async function handleSwitchSession(id: string) {
+  sessionActionError.value = ''
   if (route.path !== '/') await router.push('/')
   switchSession(id)
   emit('toggle')
@@ -173,7 +310,10 @@ async function handleDeleteSession(id: string, title: string) {
 
   deletingSessionId.value = id
   try {
+    sessionActionError.value = ''
     await removeSession(id)
+  } catch (err) {
+    sessionActionError.value = `删除会话失败：${err instanceof Error ? err.message : '未知错误'}`
   } finally {
     deletingSessionId.value = null
   }
@@ -190,10 +330,10 @@ function handleOpenManagementToken() {
 }
 
 onMounted(async () => {
-  await loadSessions()
+  await Promise.all([loadSessions(), loadAccessRequirements()])
   refreshAccessState()
-  unsubscribeManagementToken = subscribeManagementTokenChange(refreshAccessState)
-  unsubscribeAuthToken = subscribeAuthTokenChange(refreshAccessState)
+  unsubscribeManagementToken = subscribeManagementTokenChange(handleCredentialStorageChange)
+  unsubscribeAuthToken = subscribeAuthTokenChange(handleCredentialStorageChange)
 })
 
 onUnmounted(() => {
