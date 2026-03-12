@@ -17,7 +17,7 @@ import { createLogger } from '../../../logger';
 import { SubAgentTypeRegistry } from './types';
 
 // 统一导出类型层
-export type{ SubAgentTypeConfig } from './types';
+export type { SubAgentTypeConfig } from './types';
 export {
   SubAgentTypeRegistry,
   createDefaultSubAgentTypes,
@@ -32,6 +32,8 @@ export interface SubAgentToolDeps {
   tools: ToolRegistry;
   subAgentTypes: SubAgentTypeRegistry;
   maxDepth: number;
+  /** 是否允许多个子代理并行执行，默认 true */
+  parallel?: boolean;
 }
 
 /** 工具名称常量 */
@@ -69,6 +71,7 @@ export function createSubAgentTool(deps: SubAgentToolDeps, currentDepth: number 
         required: ['prompt'],
       },
     },
+    parallel: deps.parallel !== false,
     handler: async (args) => {
       const prompt = args.prompt as string;
       const typeName = (args.type as string) || 'general-purpose';

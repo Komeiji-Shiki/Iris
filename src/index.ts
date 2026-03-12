@@ -15,6 +15,7 @@ import { WebPlatform } from './platforms/web';
 
 // LLM
 import { createLLMRouter } from './llm/factory';
+import { LLMTier } from './llm/router';
 import { setRequestLogging } from './llm/transport';
 
 // 存储
@@ -104,12 +105,26 @@ async function main() {
     });
   }
 
-  // ---- 3.5 注册子 Agent 工具 ----
+  // ---- 3.5 注册子代理工具 ----
   const subAgentTypes = new SubAgentTypeRegistry();
-  for (const t of createDefaultSubAgentTypes()) {
-    if (t.name === 'recall' && !memory) continue;
-    subAgentTypes.register(t);
+  const MEMORY_TOOLS = new Set(['memory_search', 'memory_add', 'memory_delete']);
+
+  if (config.subAgents?.types && config.subAgents.types.length > 0) {
+    // 使用配置文件的子代理类型定义
+    for (const t of config.subAgents.types) {
+      // 跳过纯记忆类型（allowedTools 全为记忆工具且记忆未启用）
+      if (!memory && t.allowedTools?.every(name => MEMORY_TOOLS.has(name))) continue;
+      subAgentTypes.register({ ...t, tier: t.tier as LLMTier });
+    }
+  } else {
+    // 使用内置默认类型
+    for (const t of createDefaultSubAgentTypes()) {
+      if (!memory && t.allowedTools?.every(name => MEMORY_TOOLS.has(name))) continue;
+      subAgentTypes.register(t);
+    }
   }
+
+  const subAgentParallel = config.subAgents?.parallel;
 
   // ---- 3.5 注册用户自定义模式 ----
   const modeRegistry = new ModeRegistry();
@@ -127,14 +142,14 @@ async function main() {
   prompt.setSystemPrompt(config.system.systemPrompt || DEFAULT_SYSTEM_PROMPT);
 
   // ---- 5. 创建 Backend ----
-  const agentGuidance = buildSubAgentGuidance(subAgentTypes, !!memory);
-  const autoRecall = !(memory && tools.get('agent'));
+  const subAgentGuidance = buildSubAgentGuidance(subAgentTypes, !!memory);
+  const autoRecall = !(memory && tools.get('sub_agent'));
 
   const backend = new Backend(router, storage, tools, toolState, prompt, {
     maxToolRounds: config.system.maxToolRounds,
     stream: config.system.stream,
     autoRecall,
-    agentGuidance,
+    subAgentGuidance,
     defaultMode,
     primaryLLMConfig: config.llm.primary,
     ocrService,
@@ -146,6 +161,7 @@ async function main() {
     tools,
     subAgentTypes,
     maxDepth: config.system.maxAgentDepth,
+    parallel: subAgentParallel,
   }));
 
   // ---- 6. 创建平台适配器 ----

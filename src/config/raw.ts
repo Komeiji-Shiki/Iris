@@ -17,6 +17,7 @@ export const CONFIG_SECTION_KEYS = [
   'memory',
   'mcp',
   'modes',
+  'sub_agents',
 ] as const;
 
 export type ConfigSectionKey = typeof CONFIG_SECTION_KEYS[number];

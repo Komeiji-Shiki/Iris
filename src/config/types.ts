@@ -91,4 +91,32 @@ export interface AppConfig {
   mcp?: MCPConfig;
   /** 用户自定义模式（可选） */
   modes?: import('../modes/types').ModeDefinition[];
+  /** 子代理配置（可选，对应 sub-agents.yaml） */
+  subAgents?: SubAgentsConfig;
+}
+
+/** 子代理类型定义（配置文件格式，tier 为 string；运行时转为 SubAgentTypeConfig） */
+export interface SubAgentTypeDef {
+  /** 类型标识（从 YAML 键名解析） */
+  name: string;
+  /** 面向主 LLM 的用途说明 */
+  description: string;
+  /** 子代理的系统提示词 */
+  systemPrompt: string;
+  /** 工具白名单（与 excludedTools 互斥，优先） */
+  allowedTools?: string[];
+  /** 工具黑名单 */
+  excludedTools?: string[];
+  /** LLM 层级: primary / secondary / light */
+  tier: string;
+  /** 最大工具执行轮次 */
+  maxToolRounds: number;
+}
+
+/** 子代理全局配置（对应 sub-agents.yaml） */
+export interface SubAgentsConfig {
+  /** 是否允许多个子代理并行执行，默认 true */
+  parallel: boolean;
+  /** 自定义子代理类型定义列表（提供时完全替代内置默认） */
+  types?: SubAgentTypeDef[];
 }

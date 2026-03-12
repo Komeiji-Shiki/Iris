@@ -12,6 +12,7 @@
  *   memory.yaml   - 记忆配置（可选）
  *   mcp.yaml      - MCP 配置（可选）
  *   modes.yaml    - 模式配置（可选）
+ *   sub_agents.yaml - 子代理配置（可选）
  */
 
 import * as fs from 'fs';
@@ -25,6 +26,7 @@ import { parseSystemConfig } from './system';
 import { parseMemoryConfig } from './memory';
 import { parseMCPConfig } from './mcp';
 import { parseModeConfig } from './mode';
+import { parseSubAgentsConfig } from './sub_agents';
 import { loadRawConfigDir } from './raw';
 
 export type {
@@ -37,6 +39,8 @@ export type {
   MemoryConfig,
   MCPConfig,
   MCPServerConfig,
+  SubAgentsConfig,
+  SubAgentTypeDef,
 } from './types';
 export type { OCRConfig } from './ocr';
 
@@ -72,5 +76,6 @@ export function loadConfig(): AppConfig {
     memory: parseMemoryConfig(data.memory),
     mcp: parseMCPConfig(data.mcp),
     modes: parseModeConfig(data.modes),
+    subAgents: parseSubAgentsConfig(data.sub_agents),
   };
 }
