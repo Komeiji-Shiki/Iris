@@ -198,6 +198,16 @@ export class ClaudeFormat implements FormatAdapter {
     const st = state as ClaudeStreamState;
 
     switch (data.type) {
+      case 'message_start':
+        // message_start 事件中包含 input_tokens
+        if (data.message?.usage) {
+          st.inputTokens = data.message.usage.input_tokens ?? 0;
+          if (data.message.usage.cache_read_input_tokens) {
+            st.cacheReadInputTokens = data.message.usage.cache_read_input_tokens;
+          }
+        }
+        break;
+
       case 'content_block_start':
         if (data.content_block?.type === 'tool_use') {
           st.currentToolUse = {
@@ -250,12 +260,14 @@ export class ClaudeFormat implements FormatAdapter {
         }
         if (data.usage) {
           chunk.usageMetadata = {
+            promptTokenCount: st.inputTokens ?? 0,
             candidatesTokenCount: data.usage.output_tokens,
+            totalTokenCount: (st.inputTokens ?? 0) + (data.usage.output_tokens ?? 0),
           };
         }
         break;
 
-      // message_start, ping 等事件忽略
+      // ping 等事件忽略
     }
 
     return chunk;
@@ -265,6 +277,7 @@ export class ClaudeFormat implements FormatAdapter {
     return {
       currentToolUse: null,
       pendingFunctionCalls: [],
+      inputTokens: 0,
     } as ClaudeStreamState;
   }
 }
@@ -272,6 +285,8 @@ export class ClaudeFormat implements FormatAdapter {
 interface ClaudeStreamState extends StreamDecodeState {
   currentToolUse: { id: string; name: string; arguments: string } | null;
   pendingFunctionCalls: FunctionCallPart[];
+  inputTokens: number;
+  cacheReadInputTokens?: number;
 }
 
 function mapStopReason(reason: string | undefined): string {
