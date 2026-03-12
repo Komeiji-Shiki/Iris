@@ -6,12 +6,9 @@
 
 import { loadConfig, findConfigFile } from './config';
 
-//平台
+//平台（动态导入，避免未使用的平台拉入原生依赖导致 Termux 等环境安装失败）
 import { PlatformAdapter } from './platforms/base';
-import { ConsolePlatform } from './platforms/console';
-import { DiscordPlatform } from './platforms/discord';
-import { TelegramPlatform } from './platforms/telegram';
-import { WebPlatform } from './platforms/web';
+import type { WebPlatform as WebPlatformType } from './platforms/web';
 
 // LLM
 import { createLLMRouter } from './llm/factory';
@@ -20,10 +17,9 @@ import { setRequestLogging } from './llm/transport';
 
 // 存储
 import { JsonFileStorage } from './storage/json-file';
-import { SqliteStorage } from './storage/sqlite';
 
-// 记忆
-import { createMemoryProvider, createMemoryTools, MemoryProvider } from './memory';
+// 记忆（动态导入，避免 better-sqlite3 原生依赖）
+import type { MemoryProvider } from './memory';
 
 // MCP
 import { createMCPManager, MCPManager } from './mcp';
@@ -71,18 +67,21 @@ async function main() {
   // ---- 2. 创建存储 ----
   let storage;
   switch (config.storage.type) {
-    case 'sqlite':
+    case 'sqlite': {
+      const { SqliteStorage } = await import('./storage/sqlite');
       storage = new SqliteStorage(config.storage.dbPath);
       break;
+    }
     case 'json-file':
     default:
       storage = new JsonFileStorage(config.storage.dir);
       break;
   }
 
-  // ---- 2.5 创建记忆模块 ----
+  // ---- 2.5 创建记忆模块（按需加载，避免 better-sqlite3 原生依赖） ----
   let memory: MemoryProvider | undefined;
   if (config.memory?.enabled) {
+    const { createMemoryProvider } = await import('./memory');
     memory = createMemoryProvider({ dbPath: config.memory.dbPath });
   }
 
@@ -93,6 +92,7 @@ async function main() {
   const tools = new ToolRegistry();
   tools.registerAll([readFile, writeFile, applyDiff, searchReplace, terminal, listFiles, deleteFile, createDirectory, insertCode, deleteCode]);
   if (memory) {
+    const { createMemoryTools } = await import('./memory');
     tools.registerAll(createMemoryTools(memory));
   }
 
@@ -164,16 +164,22 @@ async function main() {
     parallel: subAgentParallel,
   }));
 
-  // ---- 6. 创建平台适配器 ----
+  // ---- 6. 创建平台适配器（按需动态导入，减少不必要的原生依赖加载） ----
   let platform: PlatformAdapter;
+  let webPlatformRef: WebPlatformType | undefined;
   switch (config.platform.type) {
-    case 'discord':
+    case 'discord': {
+      const { DiscordPlatform } = await import('./platforms/discord');
       platform = new DiscordPlatform(backend, { token: config.platform.discord.token });
       break;
-    case 'telegram':
+    }
+    case 'telegram': {
+      const { TelegramPlatform } = await import('./platforms/telegram');
       platform = new TelegramPlatform(backend, { token: config.platform.telegram.token });
       break;
+    }
     case 'web': {
+      const { WebPlatform } = await import('./platforms/web');
       const webPlatform = new WebPlatform(backend, {
         port: config.platform.web.port,
         host: config.platform.web.host,
@@ -185,11 +191,13 @@ async function main() {
         streamEnabled: config.system.stream,
       });
       if (mcpManager) webPlatform.setMCPManager(mcpManager);
+      webPlatformRef = webPlatform;
       platform = webPlatform;
       break;
     }
     case 'console':
-    default:
+    default: {
+      const { ConsolePlatform } = await import('./platforms/console');
       platform = new ConsolePlatform(backend, {
         modeName: defaultMode,
         contextWindow: config.llm.primary.contextWindow,
@@ -198,6 +206,7 @@ async function main() {
         setMCPManager: (manager?: MCPManager) => { mcpManager = manager; },
       });
       break;
+    }
   }
 
   // ---- 7. 启动平台 ----
@@ -209,7 +218,7 @@ async function main() {
     if (cleaning) return;
     cleaning = true;
     try {
-      const activeMcp = (platform instanceof WebPlatform) ? platform.getMCPManager() : mcpManager;
+      const activeMcp = webPlatformRef ? webPlatformRef.getMCPManager() : mcpManager;
       if (activeMcp) await activeMcp.disconnectAll();
       await platform.stop();
     } catch (err) {
