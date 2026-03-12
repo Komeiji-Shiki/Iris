@@ -455,11 +455,16 @@ export function App({ onReady, onSubmit, onNewSession, onLoadSession, onListSess
         )}
 
         {activeMessage && (
-          <MessageItem
-            msg={activeMessage}
-            liveParts={streamingParts.length > 0 ? streamingParts : undefined}
-            isStreaming={isStreaming}
-          />
+          <>
+            <MessageItem
+              msg={activeMessage}
+              liveParts={streamingParts.length > 0 ? streamingParts : undefined}
+              isStreaming={isStreaming}
+            />
+            {isStreaming && streamingParts.length === 0 && (
+              <GeneratingTimer isGenerating={isGenerating} />
+            )}
+          </>
         )}
         {isGenerating && !activeMessage && (
           <>
