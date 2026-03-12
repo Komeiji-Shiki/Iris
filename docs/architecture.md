@@ -91,8 +91,8 @@ interface Content {
 
 ```bash
 npm run setup    # 安装依赖
-cp config.example.yaml config.yaml
-# 编辑 config.yaml 填入 API Key
+cp -r data/configs.example data/configs
+# 编辑 data/configs/llm.yaml 填入 API Key
 npm run dev      # 开发模式
 ```
 

@@ -2,6 +2,8 @@
  * 配置类型定义
  */
 
+import type { OCRConfig } from './ocr';
+
 export interface LLMConfig {
   provider: 'gemini' | 'openai-compatible' | 'claude' | 'openai-responses';
   apiKey: string;
@@ -9,6 +11,8 @@ export interface LLMConfig {
   baseUrl: string;
   /** 模型上下文窗口大小（token 数），用于 TUI 显示占用比例 */
   contextWindow?: number;
+  /** 显式声明当前模型是否支持图片输入 */
+  supportsVision?: boolean;
   /** 自定义请求头，会覆盖 provider 内置同名 header */
   headers?: Record<string, string>;
   /** 自定义请求体，会深合并到 provider 编码后的最终请求体，支持嵌套参数 */
@@ -77,6 +81,7 @@ export interface MCPConfig {
 
 export interface AppConfig {
   llm: TieredLLMConfig;
+  ocr?: OCRConfig;
   platform: PlatformConfig;
   storage: StorageConfig;
   system: SystemConfig;

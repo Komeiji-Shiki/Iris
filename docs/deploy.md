@@ -72,19 +72,24 @@ cd /opt/iris
 sudo -u iris npm run setup
 sudo -u iris npm run build
 
-# 创建配置文件
-sudo -u iris cp config.example.yaml config.yaml
-sudo -u iris nano config.yaml
+# 创建分文件配置目录
+sudo -u iris cp -r data/configs.example data/configs
+
+# 编辑平台配置
+sudo -u iris nano data/configs/platform.yaml
+
+# 编辑 LLM 配置
+sudo -u iris nano data/configs/llm.yaml
 ```
 
-**配置要点**（`config.yaml`）：
+**配置要点**（`data/configs/platform.yaml`）：
 
 ```yaml
-platform:
-  type: web
-  web:
-    port: 8192
-    host: 127.0.0.1  # 重要：仅监听本机，通过 Nginx 反代对外暴露
+type: web
+
+web:
+  port: 8192
+  host: 127.0.0.1  # 重要：仅监听本机，通过 Nginx 反代对外暴露
 ```
 
 > **安全提示**：`host` 必须设为 `127.0.0.1`，不要用 `0.0.0.0`。否则应用会直接暴露在公网 8192 端口，绕过 Nginx 的 HTTPS 和认证保护。
@@ -217,7 +222,7 @@ DNS 记录通过 CF 代理通常 1-5 分钟生效。
 
 ### 8.2 Token 存储建议
 
-Cloudflare Token 推荐通过环境变量或文件提供，避免明文写入 `config.yaml`：
+Cloudflare Token 推荐通过环境变量或文件提供，避免明文写入 `data/configs/` 中的配置文件：
 
 ```yaml
 cloudflare:

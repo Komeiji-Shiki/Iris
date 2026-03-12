@@ -17,10 +17,12 @@ export interface Command {
 
 /** 内置指令列表 */
 export const COMMANDS: Command[] = [
-  { name: '/new',  description: '新建对话' },
-  { name: '/load', description: '加载历史对话' },
-  { name: '/sh',   description: '执行命令（如 cd、dir、git 等）' },
-  { name: '/exit', description: '退出应用' },
+  { name: '/new',      description: '新建对话' },
+  { name: '/load',     description: '加载历史对话' },
+  { name: '/settings', description: '打开设置中心（LLM / System / MCP）' },
+  { name: '/mcp',      description: '直接打开 MCP 管理区' },
+  { name: '/sh',       description: '执行命令（如 cd、dir、git 等）' },
+  { name: '/exit',     description: '退出应用' },
 ];
 
 interface InputBarProps {

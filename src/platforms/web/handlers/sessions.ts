@@ -10,22 +10,42 @@
 import * as http from 'http';
 import { RouteParams, sendJSON } from '../router';
 import { StorageProvider } from '../../../storage/base';
-import { Content, isTextPart, isFunctionCallPart, isFunctionResponsePart } from '../../../types';
+import { isOCRTextPart } from '../../../ocr';
+import { Content, isTextPart, isInlineDataPart, isFunctionCallPart, isFunctionResponsePart } from '../../../types';
 
 /** 将 Content[] 转换为前端友好格式 */
 function formatMessages(contents: Content[]) {
   return contents.map(c => {
     const formatted: any = { role: c.role, parts: [] };
     for (const part of c.parts) {
+      if (isOCRTextPart(part)) {
+        continue;
+      }
+
       if (isTextPart(part)) {
         formatted.parts.push({ type: 'text', text: part.text });
-      } else if (isFunctionCallPart(part)) {
+        continue;
+      }
+
+      if (isInlineDataPart(part)) {
+        formatted.parts.push({
+          type: 'image',
+          mimeType: part.inlineData.mimeType,
+          data: part.inlineData.data,
+        });
+        continue;
+      }
+
+      if (isFunctionCallPart(part)) {
         formatted.parts.push({
           type: 'function_call',
           name: part.functionCall.name,
           args: part.functionCall.args,
         });
-      } else if (isFunctionResponsePart(part)) {
+        continue;
+      }
+
+      if (isFunctionResponsePart(part)) {
         formatted.parts.push({
           type: 'function_response',
           name: part.functionResponse.name,

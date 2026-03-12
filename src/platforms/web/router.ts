@@ -70,8 +70,11 @@ export class Router {
   }
 }
 
-/** 请求体大小上限（1MB） */
-const MAX_BODY_SIZE = 1024 * 1024;
+/**
+ * 请求体大小上限（40MB）。
+ * 单张 5MB 图片经 base64 编码后约为 6.7MB，允许最多 5 张时需要更高上限。
+ */
+const MAX_BODY_SIZE = 40 * 1024 * 1024;
 
 /** 读取请求体并解析为 JSON */
 export function readBody(req: http.IncomingMessage): Promise<any> {
@@ -91,7 +94,7 @@ export function readBody(req: http.IncomingMessage): Promise<any> {
       try {
         const body = Buffer.concat(chunks).toString('utf-8');
         resolve(body ? JSON.parse(body) : {});
-      } catch (err) {
+      } catch {
         reject(new Error('请求体 JSON 解析失败'));
       }
     });

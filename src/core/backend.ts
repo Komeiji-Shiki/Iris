@@ -14,24 +14,37 @@ import { EventEmitter } from 'events';
 import * as path from 'path';
 import * as fs from 'fs';
 import { execSync } from 'child_process';
+import type { LLMConfig } from '../config/types';
 import { LLMRouter, LLMTier } from '../llm/router';
+import { supportsVision as llmSupportsVision } from '../llm/vision';
 import { StorageProvider, SessionMeta } from '../storage/base';
 import { ToolRegistry } from '../tools/registry';
 import { ToolStateManager } from '../tools/state';
 import { PromptAssembler } from '../prompt/assembler';
 import { MemoryProvider } from '../memory/base';
 import { ModeRegistry, ModeDefinition, applyToolFilter } from '../modes';
+import { OCRService, createOCRTextPart, isOCRTextPart, stripOCRTextMarker } from '../ocr';
 import { ToolLoop, ToolLoopConfig, LLMCaller } from './tool-loop';
 import { createLogger } from '../logger';
 import {
   Content, Part, LLMRequest, UsageMetadata, ToolInvocation,
-  isFunctionCallPart, isTextPart,
+  extractText, isFunctionCallPart, isFunctionResponsePart, isInlineDataPart, isTextPart,
 } from '../types';
 
 const logger = createLogger('Backend');
+const IMAGE_UNAVAILABLE_NOTICE = (count: number) => (
+  count > 1
+    ? `[用户发送了 ${count} 张图片，但当前模型无法查看图片内容]`
+    : '[用户发送了 1 张图片，但当前模型无法查看图片内容]'
+);
 
 interface ThoughtTimingState {
   activeStartedAt?: number;
+}
+
+export interface ImageInput {
+  mimeType: string;
+  data: string;
 }
 
 function appendMergedPart(parts: Part[], nextPart: Part, now: number, thoughtTiming?: ThoughtTimingState): Part {
@@ -86,6 +99,10 @@ export interface BackendConfig {
   agentGuidance?: string;
   /** 默认模式名称 */
   defaultMode?: string;
+  /** 当前 primary LLM 配置（用于 vision 能力判定） */
+  primaryLLMConfig?: LLMConfig;
+  /** OCR 服务（当主模型不支持 vision 时回退使用） */
+  ocrService?: OCRService;
 }
 
 export interface BackendEvents {
@@ -124,6 +141,8 @@ export class Backend extends EventEmitter {
   private memory?: MemoryProvider;
   private modeRegistry?: ModeRegistry;
   private defaultMode?: string;
+  private primaryLLMConfig?: LLMConfig;
+  private ocrService?: OCRService;
 
   private toolLoop: ToolLoop;
   private toolLoopConfig: ToolLoopConfig;
@@ -154,6 +173,8 @@ export class Backend extends EventEmitter {
     this.memory = memory;
     this.modeRegistry = modeRegistry;
     this.defaultMode = config?.defaultMode;
+    this.primaryLLMConfig = config?.primaryLLMConfig;
+    this.ocrService = config?.ocrService;
 
     this.toolLoopConfig = { maxRounds: config?.maxToolRounds ?? 200 };
     this.toolLoop = new ToolLoop(tools, prompt, this.toolLoopConfig, toolState);
@@ -165,9 +186,11 @@ export class Backend extends EventEmitter {
   // ============ 公共 API（平台层调用） ============
 
   /** 发送消息，触发完整的 LLM + 工具循环 */
-  async chat(sessionId: string, text: string): Promise<void> {
+  async chat(sessionId: string, text: string, images?: ImageInput[]): Promise<void> {
     try {
-      await this.handleMessage(sessionId, [{ text }]);
+      const storedUserParts = await this.buildStoredUserParts(text, images);
+      const llmUserParts = this.preparePartsForLLM(storedUserParts);
+      await this.handleMessage(sessionId, storedUserParts, llmUserParts);
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       logger.error(`处理消息失败 (session=${sessionId}):`, err);
@@ -306,24 +329,33 @@ export class Backend extends EventEmitter {
   }
 
   /** 热重载：更新运行时参数 */
-  reloadConfig(opts: { stream?: boolean; maxToolRounds?: number; systemPrompt?: string }): void {
+  reloadConfig(opts: {
+    stream?: boolean;
+    maxToolRounds?: number;
+    systemPrompt?: string;
+    primaryLLMConfig?: LLMConfig;
+    ocrService?: OCRService;
+  }): void {
     if (opts.stream !== undefined) this.stream = opts.stream;
     if (opts.maxToolRounds !== undefined) this.toolLoopConfig.maxRounds = opts.maxToolRounds;
     if (opts.systemPrompt !== undefined) this.prompt.setSystemPrompt(opts.systemPrompt);
+    if ('primaryLLMConfig' in opts) this.primaryLLMConfig = opts.primaryLLMConfig;
+    if ('ocrService' in opts) this.ocrService = opts.ocrService;
     logger.info(`配置已热重载: stream=${this.stream} maxToolRounds=${this.toolLoopConfig.maxRounds}`);
   }
 
   // ============ 核心流程 ============
 
-  private async handleMessage(sessionId: string, userParts: Part[]): Promise<void> {
+  private async handleMessage(sessionId: string, storedUserParts: Part[], llmUserParts: Part[]): Promise<void> {
     this.activeSessionId = sessionId;
     const startTime = Date.now();
 
     // 1. 加载历史并追加用户消息
-    const history = await this.storage.getHistory(sessionId);
-    const isNewSession = history.length === 0;
+    const storedHistory = await this.storage.getHistory(sessionId);
+    const history = this.prepareHistoryForLLM(storedHistory);
+    const isNewSession = storedHistory.length === 0;
     const historyLenBefore = history.length;
-    history.push({ role: 'user', parts: userParts });
+    history.push({ role: 'user', parts: llmUserParts });
 
     // 2. 构建 per-request 额外上下文
     let extraParts: Part[] | undefined;
@@ -331,7 +363,7 @@ export class Backend extends EventEmitter {
     // 记忆自动召回
     if (this.memory && this.autoRecall) {
       try {
-        const userText = userParts.filter(isTextPart).map(p => p.text).join('');
+        const userText = extractText(llmUserParts);
         const context = await this.memory.buildContext(userText);
         if (context) {
           extraParts = [{ text: context }];
@@ -378,8 +410,13 @@ export class Backend extends EventEmitter {
       loop = new ToolLoop(filteredTools, this.prompt, this.toolLoopConfig, this.toolState);
     }
 
+    const hasVisionParts = history.some(content => content.parts.some(isInlineDataPart));
+
     // 5. 执行工具循环
-    const result = await loop.run(history, callLLM, { extraParts });
+    const result = await loop.run(history, callLLM, {
+      extraParts,
+      secondaryTier: hasVisionParts ? 'primary' : undefined,
+    });
 
     // 6. 将耗时写入最后一条 model 消息
     const durationMs = Date.now() - startTime;
@@ -391,12 +428,13 @@ export class Backend extends EventEmitter {
     }
 
     // 7. 持久化新增消息
-    for (let i = historyLenBefore; i < result.history.length; i++) {
+    await this.storage.addMessage(sessionId, { role: 'user', parts: storedUserParts });
+    for (let i = historyLenBefore + 1; i < result.history.length; i++) {
       await this.storage.addMessage(sessionId, result.history[i]);
     }
 
     // 8. 管理会话元数据
-    await this.updateSessionMeta(sessionId, userParts, isNewSession);
+    await this.updateSessionMeta(sessionId, storedUserParts, isNewSession);
 
     // 9. 非流式模式：发送最终文本
     if (!this.stream && result.text) {
@@ -498,12 +536,140 @@ export class Backend extends EventEmitter {
 
   // ============ 会话元数据 ============
 
+  private async buildStoredUserParts(text: string, images?: ImageInput[]): Promise<Part[]> {
+    const parts: Part[] = [];
+    const hasText = text.trim().length > 0;
+    const hasImages = Array.isArray(images) && images.length > 0;
+    const visionEnabled = llmSupportsVision(this.primaryLLMConfig);
+
+    if (hasImages) {
+      if (visionEnabled || !this.ocrService) {
+        for (const image of images!) {
+          parts.push({ inlineData: { mimeType: image.mimeType, data: image.data } });
+        }
+      } else if (this.ocrService) {
+        const ocrTexts = await Promise.all(images!.map(async (image, index) => {
+          try {
+            return await this.ocrService!.extractText(image.mimeType, image.data);
+          } catch (err) {
+            const detail = err instanceof Error ? err.message : String(err);
+            throw new Error(`OCR 处理第 ${index + 1} 张图片失败: ${detail}`);
+          }
+        }));
+
+        for (let index = 0; index < images!.length; index++) {
+          const image = images![index];
+          parts.push({ inlineData: { mimeType: image.mimeType, data: image.data } });
+          parts.push(createOCRTextPart(index + 1, ocrTexts[index]));
+        }
+      }
+    }
+
+    if (hasText) {
+      parts.push({ text });
+    }
+
+    if (parts.length === 0) {
+      parts.push({ text: '' });
+    }
+
+    return parts;
+  }
+
+  private prepareHistoryForLLM(history: Content[]): Content[] {
+    return history.map((content) => ({
+      role: content.role,
+      parts: this.preparePartsForLLM(content.parts),
+      usageMetadata: content.usageMetadata,
+      durationMs: content.durationMs,
+      streamOutputDurationMs: content.streamOutputDurationMs,
+    }));
+  }
+
+  private preparePartsForLLM(parts: Part[]): Part[] {
+    const visionEnabled = llmSupportsVision(this.primaryLLMConfig);
+    const prepared: Part[] = [];
+    let strippedImageCount = 0;
+    let hasOCRContext = false;
+
+    for (const part of parts) {
+      if (isOCRTextPart(part)) {
+        hasOCRContext = true;
+        if (!visionEnabled && part.text) {
+          prepared.push({ ...part, text: stripOCRTextMarker(part.text) });
+        }
+        continue;
+      }
+
+      if (isInlineDataPart(part)) {
+        if (visionEnabled) {
+          prepared.push({ inlineData: { ...part.inlineData } });
+        } else {
+          strippedImageCount++;
+        }
+        continue;
+      }
+
+      if (isFunctionCallPart(part)) {
+        prepared.push({
+          functionCall: {
+            name: part.functionCall.name,
+            args: JSON.parse(JSON.stringify(part.functionCall.args ?? {})),
+          },
+        });
+        continue;
+      }
+
+      if (isFunctionResponsePart(part)) {
+        prepared.push({
+          functionResponse: {
+            name: part.functionResponse.name,
+            response: JSON.parse(JSON.stringify(part.functionResponse.response ?? {})),
+          },
+        });
+        continue;
+      }
+
+      if (isTextPart(part)) {
+        prepared.push({
+          ...part,
+          thoughtSignatures: part.thoughtSignatures ? { ...part.thoughtSignatures } : undefined,
+        });
+        continue;
+      }
+
+      const _exhaustive: never = part;
+      void _exhaustive;
+    }
+
+    if (!visionEnabled && strippedImageCount > 0 && !hasOCRContext) {
+      prepared.unshift({ text: IMAGE_UNAVAILABLE_NOTICE(strippedImageCount) });
+    }
+
+    if (prepared.length === 0) {
+      prepared.push({ text: '' });
+    }
+
+    return prepared;
+  }
+
   private async updateSessionMeta(sessionId: string, userParts: Part[], isNewSession: boolean): Promise<void> {
     const now = new Date().toISOString();
     const cwd = process.cwd();
 
     if (isNewSession) {
-      const title = userParts.filter(isTextPart).map(p => p.text).join('').slice(0, 100) || '新对话';
+      const titleText = userParts.reduce((result, part) => {
+        if (isOCRTextPart(part)) {
+          return result;
+        }
+
+        if (isTextPart(part)) {
+          return result + (part.text ?? '');
+        }
+
+        return result;
+      }, '').trim();
+      const title = titleText.slice(0, 100) || (userParts.some(isInlineDataPart) ? '图片消息' : '新对话');
       await this.storage.saveMeta({
         id: sessionId,
         title,

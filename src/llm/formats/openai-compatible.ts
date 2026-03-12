@@ -7,7 +7,7 @@
 
 import {
   LLMRequest, LLMResponse, LLMStreamChunk, Part,
-  isTextPart, isVisibleTextPart, isFunctionCallPart, isFunctionResponsePart,
+  isTextPart, isVisibleTextPart, isInlineDataPart, isFunctionCallPart, isFunctionResponsePart,
 } from '../../types';
 import { FormatAdapter, StreamDecodeState } from './types';
 
@@ -71,11 +71,32 @@ export class OpenAICompatibleFormat implements FormatAdapter {
           }
           pendingCallId += funcRespParts.length;
         } else {
-          const text = textParts.map(p => {
-            if (!isTextPart(p)) throw new Error('unreachable');
-            return p.text;
-          }).join('');
-          messages.push({ role: 'user', content: text });
+          const contentBlocks: Record<string, unknown>[] = [];
+          let hasInlineImage = false;
+
+          for (const part of content.parts) {
+            if (isTextPart(part) && part.thought !== true && part.text) {
+              contentBlocks.push({ type: 'text', text: part.text });
+            } else if (isInlineDataPart(part)) {
+              hasInlineImage = true;
+              contentBlocks.push({
+                type: 'image_url',
+                image_url: {
+                  url: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`,
+                },
+              });
+            }
+          }
+
+          if (hasInlineImage) {
+            messages.push({ role: 'user', content: contentBlocks });
+          } else {
+            const text = textParts.map(p => {
+              if (!isTextPart(p)) throw new Error('unreachable');
+              return p.text;
+            }).join('');
+            messages.push({ role: 'user', content: text });
+          }
         }
       }
     }
@@ -122,7 +143,14 @@ export class OpenAICompatibleFormat implements FormatAdapter {
     const msg = choice.message;
     const parts: Part[] = [];
 
-    if (msg.content) parts.push({ text: msg.content });
+    if (typeof msg.content === 'string') {
+      parts.push({ text: msg.content });
+    } else if (Array.isArray(msg.content)) {
+      for (const block of msg.content) {
+        if (typeof block === 'string') parts.push({ text: block });
+        else if (block?.type === 'text' && typeof block.text === 'string') parts.push({ text: block.text });
+      }
+    }
     if (msg.tool_calls) {
       for (const tc of msg.tool_calls) {
         parts.push({

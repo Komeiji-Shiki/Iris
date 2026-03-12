@@ -8,7 +8,7 @@
 import { ref, watch } from 'vue'
 import { useSessions } from './useSessions'
 import * as api from '../api/client'
-import type { Message } from '../api/types'
+import type { ImageInput, Message, MessagePart } from '../api/types'
 
 /** 当前会话的消息列表 */
 const messages = ref<Message[]>([])
@@ -35,6 +35,35 @@ let activeRequestToken: symbol | null = null
 let activeRequestSessionId: string | null = null
 
 const { currentSessionId, loadSessions } = useSessions()
+
+function normalizeImages(images?: ImageInput[]): ImageInput[] {
+  return (images ?? []).map((image) => ({
+    mimeType: image.mimeType,
+    data: image.data,
+  }))
+}
+
+function buildUserMessageParts(text: string, images?: ImageInput[]): MessagePart[] {
+  const parts: MessagePart[] = []
+
+  for (const image of normalizeImages(images)) {
+    parts.push({
+      type: 'image',
+      mimeType: image.mimeType,
+      data: image.data,
+    })
+  }
+
+  if (text.trim().length > 0) {
+    parts.push({ type: 'text', text })
+  }
+
+  if (parts.length === 0) {
+    parts.push({ type: 'text', text: '' })
+  }
+
+  return parts
+}
 
 /** 取消当前请求并失效对应回调 */
 function abortCurrent() {
@@ -91,15 +120,19 @@ export function useChat() {
     isStreaming.value = false
   }
 
-  async function sendMessage(text: string) {
-    if (sending.value || !text.trim()) return
+  async function sendMessage(text: string, images?: ImageInput[]) {
+    const normalizedImages = normalizeImages(images)
+    if (sending.value || (!text.trim() && normalizedImages.length === 0)) return
 
     sending.value = true
     streamingText.value = ''
     isStreaming.value = false
 
     // 立即显示用户消息
-    messages.value.push({ role: 'user', parts: [{ type: 'text', text }] })
+    messages.value.push({
+      role: 'user',
+      parts: buildUserMessageParts(text, normalizedImages),
+    })
 
     // 记录本次请求上下文，用于回调归属校验
     const requestToken = Symbol('chat-request')
@@ -157,7 +190,7 @@ export function useChat() {
         activeRequestToken = null
         activeRequestSessionId = null
       },
-    })
+    }, normalizedImages)
   }
 
   /** 重试：截断后端历史，移除前端消息，重新发送 */
@@ -174,12 +207,18 @@ export function useChat() {
     }
     if (lastUserIdx < 0) return
 
-    // 提取用户消息文本
     const userMsg = messages.value[lastUserIdx]
-    const textPart = userMsg.parts.find(p => p.type === 'text')
-    if (!textPart || !textPart.text) return
+    const text = userMsg.parts
+      .filter((part) => part.type === 'text')
+      .map((part) => part.text ?? '')
+      .join('')
+    const images = userMsg.parts
+      .filter((part): part is MessagePart & { type: 'image'; mimeType: string; data: string } => (
+        part.type === 'image' && typeof part.mimeType === 'string' && typeof part.data === 'string'
+      ))
+      .map((part) => ({ mimeType: part.mimeType, data: part.data }))
 
-    const text = textPart.text
+    if (!text.trim() && images.length === 0) return
 
     // 提前置忙，防止异步截断期间重复触发
     sending.value = true
@@ -205,7 +244,7 @@ export function useChat() {
 
     // 解除忙状态后重新发送（sendMessage 内部会重新置 sending = true）
     sending.value = false
-    sendMessage(text)
+    void sendMessage(text, images)
   }
 
   return { messages, sending, streamingText, isStreaming, sendMessage, retryLastMessage }

@@ -2,83 +2,79 @@
 
 ## 职责
 
-平台适配器负责将用户输入转换为 `Backend.chat()` 调用，并监听 Backend 事件将结果转换为平台特定的输出。
+平台适配器负责：
+
+- 将用户输入转换为 `Backend.chat()` 调用
+- 监听 Backend 事件，并转换成平台特定输出
+- 维护平台自己的会话标识、连接对象、UI 状态
 
 平台与 Backend 的关系是单向依赖：
 
-```
+```text
 Platform ──调方法──▶ Backend
 Platform ◀──听事件── Backend
 ```
 
-Backend 不知道任何平台的存在。
+Backend 不知道具体平台存在。
+
+---
 
 ## 文件结构
 
-```
+```text
 src/platforms/
-├── base.ts              PlatformAdapter 抽象基类
-├── console/index.ts     控制台 TUI（Ink/React）
-├── discord/index.ts     Discord Bot
-├── telegram/index.ts    Telegram Bot
-└── web/                 Web GUI
-    ├── index.ts         WebPlatform（HTTP + SSE）
-    ├── router.ts        轻量路由
-    ├── handlers/        API 处理器
-    ├── security/        安全模块
-    ├── deploy/          部署配置生成器
-    └── cloudflare/      Cloudflare 集成
+├── base.ts              # PlatformAdapter 抽象基类
+├── console/             # 控制台 TUI（Ink / React）
+├── discord/             # Discord Bot
+├── telegram/            # Telegram Bot
+└── web/                 # Web GUI（HTTP + SSE + Vue）
 ```
+
+---
 
 ## 基类：PlatformAdapter
 
-```typescript
+```ts
 abstract class PlatformAdapter {
-  /** 启动平台 */
-  abstract start(): Promise<void>;
-
-  /** 停止平台 */
-  abstract stop(): Promise<void>;
-
-  /** 平台名称 */
-  get name(): string;
+  abstract start(): Promise<void>
+  abstract stop(): Promise<void>
+  get name(): string
 }
 ```
 
-基类只定义生命周期接口。不包含任何回调注册、消息发送方法。
+基类只约束生命周期，不关心消息格式。
+
+---
 
 ## 平台适配模式
 
-所有平台适配器遵循同一模式：
+所有平台适配器都遵循同一模式：
 
-```typescript
+```ts
 class XxxPlatform extends PlatformAdapter {
-  private backend: Backend;
-
-  constructor(backend: Backend, ...) {
-    this.backend = backend;
-  }
+  constructor(private backend: Backend, ...) {}
 
   async start() {
-    // 1. 监听 Backend 事件
-    this.backend.on('response', (sid, text) => { /* 输出到用户 */ });
-    this.backend.on('stream:chunk', (sid, chunk) => { /* 流式输出 */ });
-    // ...
+    this.backend.on('response', (sid, text) => { /* 输出 */ })
+    this.backend.on('stream:chunk', (sid, chunk) => { /* 流式输出 */ })
 
-    // 2. 监听用户输入
-    this.on('userMessage', (text) => {
-      this.backend.chat(this.sessionId, text);
-    });
+    // 某处收到用户输入后：
+    await this.backend.chat(sessionId, text)
   }
 }
 ```
 
-### 关键约束
+如果平台支持图片输入，则调用会扩展为：
 
-- 平台层不包含任何 AI/LLM 逻辑
-- 平台层不直接访问存储层（通过 Backend API）
-- 多个平台可以共用同一个 Backend 实例，通过 sessionId 隔离
-- 事件回调中通过 sessionId 过滤自己关心的会话
+```ts
+await this.backend.chat(sessionId, text, images)
+```
+
+其中：
+
+```ts
+images: Array<{ mimeType: string; data: string }>
+```
 
 ---
 
@@ -90,12 +86,12 @@ class XxxPlatform extends PlatformAdapter {
 
 | 项目 | 说明 |
 |------|------|
-| 构造参数 | `(backend, modeName?)` |
+| 构造参数 | `(backend, { modeName?, contextWindow?, configDir, getMCPManager, setMCPManager })` |
 | sessionId | 启动时生成时间戳 ID，如 `20250715_143052_a7x2` |
-| 流式支持 | 支持，通过 `stream:chunk` 事件逐块显示 |
+| 流式支持 | 支持 |
 | 工具状态 | 通过 `tool:update` 事件实时显示 |
-| 指令 | `/new` 新建对话、`/load` 加载历史、`/sh <命令>` 执行命令、`/exit` 退出 |
-| 会话管理 | `/load` 通过 `backend.listSessionMetas()` 获取列表，选择后通过 `backend.getHistory()` 加载 |
+| 指令 | `/new`、`/load`、`/sh <命令>`、`/exit` 等 |
+| 图片输入 | 当前未实现终端内图片上传 |
 
 ### Discord
 
@@ -105,8 +101,9 @@ class XxxPlatform extends PlatformAdapter {
 |------|------|
 | 构造参数 | `(backend, { token })` |
 | sessionId | `discord-{channelId}` |
-| 流式支持 | 不支持（Discord 无流式接口），仅监听 `response` 事件 |
+| 流式支持 | 不支持，仅监听 `response` |
 | 消息限制 | 自动分段，每段最多 2000 字符 |
+| 图片输入 | 当前未接入 |
 
 ### Telegram
 
@@ -116,23 +113,32 @@ class XxxPlatform extends PlatformAdapter {
 |------|------|
 | 构造参数 | `(backend, { token })` |
 | sessionId | `telegram-{chatId}` |
-| 流式支持 | 不支持，仅监听 `response` 事件 |
+| 流式支持 | 不支持，仅监听 `response` |
 | 消息限制 | 自动分段，每段最多 4096 字符 |
+| 图片输入 | 当前未接入 |
 
 ### Web
 
-基于 Node.js 原生 `http` 模块，零新依赖。前端为 Vue 3 + Vite。
+基于 Node.js 原生 `http` 模块，零额外后端 Web 框架；前端为 Vue 3 + Vite。
 
 | 项目 | 说明 |
 |------|------|
 | 构造参数 | `(backend, { port, host, authToken?, managementToken?, configPath, ... })` |
 | sessionId | 客户端传入，或自动生成 `web-{uuid}` |
-| 流式支持 | 支持，通过 SSE 推送 `delta` / `stream_end` 事件 |
+| 流式支持 | 支持，通过 SSE 推送 `delta` / `stream_end` |
+| 图片输入 | 支持文件选择、拖拽上传、剪贴板粘贴 |
+| 历史回显 | 支持图片消息回显 |
 | 热重载 | 通过 `backend.reloadLLM()` / `backend.reloadConfig()` 实现 |
+
+#### Web 前端上传约束
+
+- 最多 5 张图片
+- 单张不超过 5MB
+- 请求体总上限约 40MB（考虑 base64 编码膨胀）
 
 #### Web 平台事件映射
 
-| Backend 事件 | SSE 事件 |
+| Backend 事件 | SSE 数据 |
 |---|---|
 | `response` | `{ type: 'message', text }` |
 | `stream:chunk` | `{ type: 'delta', text }` |
@@ -151,16 +157,58 @@ class XxxPlatform extends PlatformAdapter {
 | PUT | `/api/config` | 更新配置（触发热重载） |
 | GET | `/api/status` | 服务器状态 |
 
+#### `POST /api/chat` 请求体
+
+```json
+{
+  "sessionId": "web-optional-id",
+  "message": "请帮我看一下这张图",
+  "images": [
+    {
+      "mimeType": "image/png",
+      "data": "iVBORw0KGgoAAA..."
+    }
+  ]
+}
+```
+
+说明：
+
+- `message` 可以为空，但 `message` 和 `images` 不能同时为空
+- `images[].data` 为 **不带前缀** 的 base64 字符串
+- 服务端也兼容 `data:image/png;base64,...` 形式的数据 URL
+
+#### 会话历史返回的图片 part
+
+`GET /api/sessions/:id/messages` 中，图片会以如下形式返回给前端：
+
+```json
+{
+  "role": "user",
+  "parts": [
+    {
+      "type": "image",
+      "mimeType": "image/png",
+      "data": "iVBORw0KGgoAAA..."
+    },
+    {
+      "type": "text",
+      "text": "请描述这张图"
+    }
+  ]
+}
+```
+
 #### Web 平台内部方法
 
-供 `chat handler` 等内部模块调用：
+供 `handlers/` 等内部模块调用：
 
 | 方法 | 说明 |
 |------|------|
-| `hasPending(sessionId)` | 检查是否有正在处理的 SSE 连接 |
+| `hasPending(sessionId)` | 检查是否已有进行中的 SSE 连接 |
 | `registerPending(sessionId, res)` | 注册 SSE 响应 |
 | `removePending(sessionId)` | 移除 SSE 响应 |
-| `dispatchMessage(sessionId, message)` | 调用 `backend.chat()` |
+| `dispatchMessage(sessionId, message, images?)` | 调用 `backend.chat()` |
 | `setMCPManager(mgr)` | 注入 MCP 管理器 |
 | `getMCPManager()` | 获取 MCP 管理器 |
 
@@ -168,7 +216,7 @@ class XxxPlatform extends PlatformAdapter {
 
 ## 工具函数
 
-`splitText(text, maxLen)` — 按最大长度分段，优先在换行处切分。供有消息长度限制的平台使用。
+`splitText(text, maxLen)`：按最大长度分段，优先在换行处切分。供 Discord / Telegram 等受消息长度限制的平台使用。
 
 ---
 
@@ -176,8 +224,8 @@ class XxxPlatform extends PlatformAdapter {
 
 1. 创建 `src/platforms/新平台名/index.ts`
 2. 继承 `PlatformAdapter`
-3. 构造函数接收 `backend: Backend` 参数
+3. 构造函数接收 `backend: Backend`
 4. 在 `start()` 中监听需要的 Backend 事件（`response` / `stream:*` / `tool:update` / `error`）
-5. 监听用户输入，调用 `backend.chat(sessionId, text)`
-6. sessionId 建议为 `"平台名-唯一标识"`，如 `"discord-123456"`
+5. 监听用户输入并调用 `backend.chat(sessionId, text)`
+6. 若平台要支持图片输入，则改为 `backend.chat(sessionId, text, images)`
 7. 在 `src/index.ts` 中添加 import 和 switch case

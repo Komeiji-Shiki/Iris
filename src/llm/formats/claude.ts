@@ -6,7 +6,7 @@
 
 import {
   LLMRequest, LLMResponse, LLMStreamChunk, Part, FunctionCallPart,
-  isTextPart, isVisibleTextPart, isFunctionCallPart, isFunctionResponsePart,
+  isTextPart, isVisibleTextPart, isInlineDataPart, isFunctionCallPart, isFunctionResponsePart,
 } from '../../types';
 import { FormatAdapter, StreamDecodeState } from './types';
 
@@ -81,11 +81,34 @@ export class ClaudeFormat implements FormatAdapter {
           }
           messages.push({ role: 'user', content: contentBlocks });
         } else {
-          const text = textParts.map(p => {
-            if (!isTextPart(p)) throw new Error('unreachable');
-            return p.text;
-          }).join('');
-          messages.push({ role: 'user', content: text });
+          const contentBlocks: Record<string, unknown>[] = [];
+          let hasInlineImage = false;
+
+          for (const part of content.parts) {
+            if (isTextPart(part) && part.thought !== true && part.text) {
+              contentBlocks.push({ type: 'text', text: part.text });
+            } else if (isInlineDataPart(part)) {
+              hasInlineImage = true;
+              contentBlocks.push({
+                type: 'image',
+                source: {
+                  type: 'base64',
+                  media_type: part.inlineData.mimeType,
+                  data: part.inlineData.data,
+                },
+              });
+            }
+          }
+
+          if (hasInlineImage) {
+            messages.push({ role: 'user', content: contentBlocks });
+          } else {
+            const text = textParts.map(p => {
+              if (!isTextPart(p)) throw new Error('unreachable');
+              return p.text;
+            }).join('');
+            messages.push({ role: 'user', content: text });
+          }
         }
       }
     }

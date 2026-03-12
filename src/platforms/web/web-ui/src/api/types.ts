@@ -1,7 +1,15 @@
+/** 图片输入 */
+export interface ImageInput {
+  mimeType: string
+  data: string
+}
+
 /** 消息内容部分 */
 export interface MessagePart {
-  type: 'text' | 'function_call' | 'function_response'
+  type: 'text' | 'image' | 'function_call' | 'function_response'
   text?: string
+  mimeType?: string
+  data?: string
   name?: string
   args?: unknown
   response?: unknown

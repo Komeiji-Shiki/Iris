@@ -11,8 +11,10 @@ import { Backend } from '../../core/backend';
 import { SessionMeta } from '../../storage/base';
 import { Content, Part, ToolInvocation, ToolStatus, UsageMetadata } from '../../types';
 import { setGlobalLogLevel, LogLevel } from '../../logger/index';
+import type { MCPManager } from '../../mcp';
 import { App, AppHandle, MessageMeta } from './App';
 import { MessagePart } from './components/MessageItem';
+import { ConsoleSettingsController, ConsoleSettingsSaveResult, ConsoleSettingsSnapshot } from './settings';
 
 function createToolInvocationFromFunctionCall(part: any, index: number, status: ToolStatus): ToolInvocation {
   return {
@@ -76,23 +78,38 @@ function generateSessionId(): string {
   return `${ts}_${rand}`;
 }
 
+export interface ConsolePlatformOptions {
+  modeName?: string;
+  contextWindow?: number;
+  configDir: string;
+  getMCPManager: () => MCPManager | undefined;
+  setMCPManager: (manager?: MCPManager) => void;
+}
+
 export class ConsolePlatform extends PlatformAdapter {
   private sessionId: string;
   private modeName?: string;
   private contextWindow?: number;
   private backend: Backend;
+  private settingsController: ConsoleSettingsController;
   private inkInstance?: Instance;
   private appHandle?: AppHandle;
 
   /** 当前响应周期内的工具调用 ID 集合 */
   private currentToolIds = new Set<string>();
 
-  constructor(backend: Backend, modeName?: string, contextWindow?: number) {
+  constructor(backend: Backend, options: ConsolePlatformOptions) {
     super();
     this.backend = backend;
     this.sessionId = generateSessionId();
-    this.modeName = modeName;
-    this.contextWindow = contextWindow;
+    this.modeName = options.modeName;
+    this.contextWindow = options.contextWindow;
+    this.settingsController = new ConsoleSettingsController({
+      backend,
+      configDir: options.configDir,
+      getMCPManager: options.getMCPManager,
+      setMCPManager: options.setMCPManager,
+    });
   }
 
   override async start(): Promise<void> {
@@ -167,6 +184,8 @@ export class ConsolePlatform extends PlatformAdapter {
         onLoadSession: (id: string) => this.handleLoadSession(id),
         onListSessions: () => this.handleListSessions(),
         onRunCommand: (cmd: string) => this.handleRunCommand(cmd),
+        onLoadSettings: () => this.handleLoadSettings(),
+        onSaveSettings: (snapshot: ConsoleSettingsSnapshot) => this.handleSaveSettings(snapshot),
         onExit: () => this.stop(),
         modeName: this.modeName,
         contextWindow: this.contextWindow,
@@ -221,6 +240,14 @@ export class ConsolePlatform extends PlatformAdapter {
 
   private async handleListSessions(): Promise<SessionMeta[]> {
     return this.backend.listSessionMetas();
+  }
+
+  private async handleLoadSettings(): Promise<ConsoleSettingsSnapshot> {
+    return this.settingsController.loadSnapshot();
+  }
+
+  private async handleSaveSettings(snapshot: ConsoleSettingsSnapshot): Promise<ConsoleSettingsSaveResult> {
+    return this.settingsController.saveSnapshot(snapshot);
   }
 
   private async handleInput(text: string): Promise<void> {

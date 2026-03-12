@@ -5,6 +5,7 @@ export const ICONS = {
     close: 'close',
     settings: 'settings',
     chevronRight: 'chevron_right',
+    attach: 'attach_file',
     send: 'north_east',
   },
   sidebar: {

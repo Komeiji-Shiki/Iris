@@ -11,17 +11,15 @@ import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { PlatformAdapter } from '../base';
 import { Backend } from '../../core/backend';
+import type { ImageInput } from '../../core/backend';
 import { Router, sendJSON } from './router';
 import { createChatHandler } from './handlers/chat';
 import { createSessionsHandlers } from './handlers/sessions';
 import { createConfigHandlers } from './handlers/config';
-import { createLLMRouter } from '../../llm/factory';
-import { parseTieredLLMConfig } from '../../config/llm';
-import { parseMCPConfig } from '../../config/mcp';
-import { DEFAULT_SYSTEM_PROMPT } from '../../prompt/templates/default';
 import { createLogger } from '../../logger';
-import { MCPManager, createMCPManager } from '../../mcp';
+import { MCPManager } from '../../mcp';
 import { assertManagementToken } from './security/management';
+import { applyRuntimeConfigReload } from '../../config/runtime';
 
 const logger = createLogger('WebPlatform');
 
@@ -193,8 +191,8 @@ export class WebPlatform extends PlatformAdapter {
   }
 
   /** 分发用户消息到 Backend */
-  async dispatchMessage(sessionId: string, message: string): Promise<void> {
-    await this.backend.chat(sessionId, message);
+  async dispatchMessage(sessionId: string, message: string, images?: ImageInput[]): Promise<void> {
+    await this.backend.chat(sessionId, message, images);
   }
 
   /** 注入 MCP 管理器引用 */
@@ -217,7 +215,6 @@ export class WebPlatform extends PlatformAdapter {
 
   private setupRoutes(): void {
     const storage = this.backend.getStorage();
-    const tools = this.backend.getTools();
     const { configPath } = this.config;
 
     // 聊天 API
@@ -232,44 +229,20 @@ export class WebPlatform extends PlatformAdapter {
 
     // 配置管理 API（带热重载回调）
     const config = createConfigHandlers(configPath, async (mergedConfig) => {
-      // 重建 LLM 路由器
-      const tieredConfig = parseTieredLLMConfig(mergedConfig.llm);
-      const newRouter = createLLMRouter(tieredConfig);
-      this.backend.reloadLLM(newRouter);
-      // 更新运行时参数
-      this.backend.reloadConfig({
-        stream: mergedConfig.system?.stream,
-        maxToolRounds: mergedConfig.system?.maxToolRounds,
-        systemPrompt: mergedConfig.system?.systemPrompt || DEFAULT_SYSTEM_PROMPT,
-      });
-      // 更新本地状态
-      this.config.llmName = tieredConfig.primary.provider ?? this.config.llmName;
-      this.config.modelName = tieredConfig.primary.model ?? this.config.modelName;
-      this.config.streamEnabled = mergedConfig.system?.stream ?? this.config.streamEnabled;
+      const summary = await applyRuntimeConfigReload(
+        {
+          backend: this.backend,
+          getMCPManager: () => this.mcpManager,
+          setMCPManager: (manager?: MCPManager) => {
+            this.mcpManager = manager;
+          },
+        },
+        mergedConfig,
+      );
 
-      // MCP 热重载
-      const newMcpConfig = parseMCPConfig(mergedConfig.mcp);
-      const unregisterOldMcpTools = () => {
-        for (const name of tools.listTools()) {
-          if (name.startsWith('mcp__')) tools.unregister(name);
-        }
-      };
-      if (this.mcpManager) {
-        if (newMcpConfig) {
-          await this.mcpManager.reload(newMcpConfig);
-          unregisterOldMcpTools();
-          tools.registerAll(this.mcpManager.getTools());
-        } else {
-          await this.mcpManager.disconnectAll();
-          unregisterOldMcpTools();
-          this.mcpManager = undefined;
-        }
-      } else if (newMcpConfig) {
-        this.mcpManager = createMCPManager(newMcpConfig);
-        await this.mcpManager.connectAll();
-        unregisterOldMcpTools();
-        tools.registerAll(this.mcpManager.getTools());
-      }
+      this.config.llmName = summary.llmName;
+      this.config.modelName = summary.modelName;
+      this.config.streamEnabled = summary.streamEnabled;
     });
     this.router.get('/api/config', config.get);
     this.router.put('/api/config', config.update);

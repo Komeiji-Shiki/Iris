@@ -8,7 +8,7 @@
 
 import {
   LLMRequest, LLMResponse, LLMStreamChunk, Part,
-  isVisibleTextPart, isFunctionCallPart, isFunctionResponsePart, isTextPart,
+  isVisibleTextPart, isInlineDataPart, isFunctionCallPart, isFunctionResponsePart, isTextPart,
 } from '../../types';
 import { FormatAdapter, StreamDecodeState } from './types';
 
@@ -76,15 +76,29 @@ export class OpenAIResponsesFormat implements FormatAdapter {
           for (const part of funcRespParts) {
             if (!isFunctionResponsePart(part)) continue;
             inputItems.push({
+              type: 'function_call_output',
               call_id: `call_${toolUseIdCounter - funcRespParts.length + inputItems.filter(i => i.type === 'function_call_output').length}`,
               output: JSON.stringify(part.functionResponse.response)
             });
           }
         } else {
-          const text = content.parts.filter(isTextPart).map(p => p.text || '').join('');
+          const contentBlocks: any[] = [];
+          for (const part of content.parts) {
+            if (isTextPart(part) && part.thought !== true && part.text) {
+              contentBlocks.push({ type: 'input_text', text: part.text });
+            } else if (isInlineDataPart(part)) {
+              contentBlocks.push({
+                type: 'input_image',
+                image_url: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`,
+              });
+            }
+          }
+          if (contentBlocks.length === 0) {
+            contentBlocks.push({ type: 'input_text', text: ' ' });
+          }
           inputItems.push({
             role: 'user',
-            content: [{ type: 'input_text', text: text || ' ' }]
+            content: contentBlocks,
           });
         }
       }
@@ -109,7 +123,7 @@ export class OpenAIResponsesFormat implements FormatAdapter {
       if (gc.temperature !== undefined) body.temperature = gc.temperature;
       if (gc.topP !== undefined) body.top_p = gc.topP;
       // 启用推理签名回传声明
-      body.contains = ["reasoning.encrypted_content"];
+      body.contains = ['reasoning.encrypted_content'];
     }
 
     if (stream) body.stream = true;
@@ -212,6 +226,10 @@ export class OpenAIResponsesFormat implements FormatAdapter {
   }
 
   createStreamState(): StreamDecodeState {
-    return {};
+    return stateFactory();
   }
+}
+
+function stateFactory(): StreamDecodeState {
+  return {};
 }

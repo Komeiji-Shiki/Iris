@@ -45,6 +45,13 @@
             @retry="emit('retry')"
           />
 
+          <ImageBubble
+            v-else-if="part.type === 'image' && part.mimeType && part.data"
+            :role="msg.role"
+            :mime-type="part.mimeType"
+            :data="part.data"
+          />
+
           <!-- 工具折叠按钮：紧跟在文本后、工具部分前显示 -->
           <button
             v-if="part.type === 'text' && part.text?.trim() && hasToolParts(msg) && isLastTextPart(msg, j)"
@@ -88,6 +95,7 @@
 import { ref, reactive, watch, nextTick } from 'vue'
 import type { Message } from '../api/types'
 import MessageBubble from './MessageBubble.vue'
+import ImageBubble from './ImageBubble.vue'
 import ToolBlock from './ToolBlock.vue'
 import AppIcon from './AppIcon.vue'
 import { ICONS } from '../constants/icons'

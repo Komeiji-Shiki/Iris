@@ -7,7 +7,13 @@ import { createLogger } from '../logger';
 
 const logger = createLogger('MCPConfig');
 
-const VALID_TRANSPORTS = ['stdio', 'sse', 'streamable-http'] as const;
+const VALID_TRANSPORTS = ['stdio', 'sse', 'streamable-http', 'http'] as const;
+
+function normalizeTransport(value: unknown): MCPServerConfig['transport'] | undefined {
+  if (value === 'http') return 'streamable-http';
+  if (value === 'stdio' || value === 'sse' || value === 'streamable-http') return value;
+  return undefined;
+}
 
 export function parseMCPConfig(raw: any): MCPConfig | undefined {
   if (!raw || !raw.servers || typeof raw.servers !== 'object') return undefined;
@@ -16,11 +22,11 @@ export function parseMCPConfig(raw: any): MCPConfig | undefined {
 
   for (const [name, cfg] of Object.entries(raw.servers)) {
     const c = cfg as any;
-if (!c || typeof c !== 'object') continue;
+    if (!c || typeof c !== 'object') continue;
 
-    const transport = c.transport;
-    if (!VALID_TRANSPORTS.includes(transport)) {
-      logger.warn(`MCP 服务器 "${name}" 的 transport 无效（需为 stdio、sse 或 streamable-http），已跳过`);
+    const transport = normalizeTransport(c.transport);
+    if (!transport) {
+      logger.warn(`MCP 服务器 "${name}" 的 transport 无效（需为 stdio、sse、streamable-http；http 会映射为 streamable-http），已跳过`);
       continue;
     }
 
@@ -32,7 +38,7 @@ if (!c || typeof c !== 'object') continue;
     if ((transport === 'sse' || transport === 'streamable-http') && !c.url) {
       logger.warn(`MCP 服务器 "${name}" 缺少 url 字段，已跳过`);
       continue;
-}
+    }
 
     servers[name] = {
       transport,

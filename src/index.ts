@@ -26,6 +26,9 @@ import { createMemoryProvider, createMemoryTools, MemoryProvider } from './memor
 // MCP
 import { createMCPManager, MCPManager } from './mcp';
 
+// OCR
+import { OCRService } from './ocr';
+
 // 工具
 import { ToolRegistry } from './tools/registry';
 import { ToolStateManager } from './tools/state';
@@ -55,6 +58,7 @@ import { DEFAULT_SYSTEM_PROMPT } from './prompt/templates/default';
 import { Backend } from './core/backend';
 
 async function main() {
+  const configDir = findConfigFile();
   const config = loadConfig();
 
   // ---- 1. 创建 LLM 路由器 ----
@@ -77,6 +81,9 @@ async function main() {
   if (config.memory?.enabled) {
     memory = createMemoryProvider({ dbPath: config.memory.dbPath });
   }
+
+  // ---- 2.6 创建 OCR 服务 ----
+  const ocrService = config.ocr ? new OCRService(config.ocr) : undefined;
 
   // ---- 3. 注册工具 ----
   const tools = new ToolRegistry();
@@ -126,6 +133,8 @@ async function main() {
     autoRecall,
     agentGuidance,
     defaultMode,
+    primaryLLMConfig: config.llm.primary,
+    ocrService,
   }, memory, modeRegistry);
 
   // 注册子代理工具（需要 backend 引用）
@@ -151,7 +160,7 @@ async function main() {
         host: config.platform.web.host,
         authToken: config.platform.web.authToken,
         managementToken: config.platform.web.managementToken,
-        configPath: findConfigFile(),
+        configPath: configDir,
         llmName: config.llm.primary.provider,
         modelName: config.llm.primary.model,
         streamEnabled: config.system.stream,
@@ -162,7 +171,13 @@ async function main() {
     }
     case 'console':
     default:
-      platform = new ConsolePlatform(backend, defaultMode, config.llm.primary.contextWindow);
+      platform = new ConsolePlatform(backend, {
+        modeName: defaultMode,
+        contextWindow: config.llm.primary.contextWindow,
+        configDir,
+        getMCPManager: () => mcpManager,
+        setMCPManager: (manager?: MCPManager) => { mcpManager = manager; },
+      });
       break;
   }
 

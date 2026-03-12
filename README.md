@@ -1,6 +1,6 @@
 # Iris
 
-模块化、可解耦的 AI 聊天框架。
+模块化、可解耦的 AI 聊天框架，支持多平台、多 LLM、工具调用，以及 Web 端图片上传与 OCR 回退。
 
 ## 快速上手
 
@@ -45,11 +45,11 @@ Copy-Item -Recurse data/configs.example data/configs
 cp -r data/configs.example data/configs
 ```
 
-然后至少检查这两个文件：
+然后至少检查这些文件：
 
 #### `data/configs/llm.yaml`
 
-填入你的模型配置，例如：
+填入你的主模型配置，例如：
 
 ```yaml
 primary:
@@ -57,7 +57,15 @@ primary:
   apiKey: your-api-key-here
   model: gemini-2.0-flash
   baseUrl: https://generativelanguage.googleapis.com/v1beta
+  supportsVision: true
 ```
+
+`supportsVision` 说明：
+
+- 可选，推荐显式填写
+- `true`：主模型支持图片输入，Web 上传的图片会直接发给模型
+- `false`：主模型不支持图片输入，此时如配置了 `ocr.yaml`，Iris 会先做 OCR，再把提取结果发给主模型
+- 不填写时，Iris 会按模型名做启发式判断，但对于自定义模型名/代理网关，仍建议手动声明
 
 `baseUrl` 规则：
 
@@ -73,7 +81,25 @@ primary:
   apiKey: your-api-key-here
   model: gpt-4o
   baseUrl: https://api.openai.com/v1
+  supportsVision: true
 ```
+
+#### `data/configs/ocr.yaml`（可选）
+
+当你的 **主模型不支持图片输入**，但你又希望 Web 端可以上传图片时，配置一个 OCR 模型：
+
+```yaml
+provider: openai-compatible
+apiKey: your-api-key-here
+baseUrl: https://api.openai.com/v1
+model: gpt-4o-mini
+```
+
+行为说明：
+
+- 主模型支持 vision：直接发图片，不走 OCR
+- 主模型不支持 vision + 已配置 OCR：先 OCR，再把图片内容文本发给主模型
+- 主模型不支持 vision + 未配置 OCR：图片仍会保存在会话历史中，但主模型只能收到“当前无法查看图片”的占位提示
 
 #### `data/configs/platform.yaml`
 
@@ -119,6 +145,8 @@ http://127.0.0.1:8192
 ```
 
 如果你在 `platform.yaml` 中把 `host` 设为 `0.0.0.0`，也可以用本机 IP 访问。
+
+> 当前 Web UI 支持：文本对话、拖拽/粘贴/上传图片、会话历史图片回显、流式回复、工具调用折叠显示。
 
 ### 方式二：前后端分开开发
 
@@ -176,6 +204,8 @@ web:
   host: 127.0.0.1
 ```
 
+如果你的主模型不支持图片输入，再额外填好 `data/configs/ocr.yaml`。
+
 然后执行：
 
 ```bash
@@ -205,11 +235,11 @@ http://127.0.0.1:8192
 | 文档 | 说明 |
 |------|------|
 | [architecture.md](./docs/architecture.md) | 全局架构总览、数据流向、AI 自升级指南 |
-| [platforms.md](./docs/platforms.md) | 用户交互层 |
-| [llm.md](./docs/llm.md) | LLM API 调用层 |
+| [platforms.md](./docs/platforms.md) | 用户交互层（含 Web 图片上传接口） |
+| [llm.md](./docs/llm.md) | LLM API 调用层（含 vision 格式映射） |
 | [storage.md](./docs/storage.md) | 聊天记录存储层 |
 | [tools.md](./docs/tools.md) | 工具注册层 |
 | [prompt.md](./docs/prompt.md) | 提示词组装层 |
 | [core.md](./docs/core.md) | 核心协调器 |
 | [deploy.md](./docs/deploy.md) | VPS 部署与 Nginx/Cloudflare 联动指南 |
-| [config.md](./docs/config.md) | 配置项说明（含管理令牌与 Cloudflare token 来源） |
+| [config.md](./docs/config.md) | 配置项说明（含 supportsVision / OCR / 管理令牌） |

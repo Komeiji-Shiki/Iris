@@ -6,8 +6,46 @@
 
 import * as http from 'http';
 import * as crypto from 'crypto';
+import type { ImageInput } from '../../../core/backend';
 import { readBody, sendJSON } from '../router';
 import type { WebPlatform } from '../index';
+
+const MAX_IMAGES = 5;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+function normalizeImages(raw: unknown): ImageInput[] | null {
+  if (raw == null) return [];
+  if (!Array.isArray(raw) || raw.length > MAX_IMAGES) return null;
+
+  const images: ImageInput[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      return null;
+    }
+
+    const mimeType = typeof (item as any).mimeType === 'string' ? (item as any).mimeType : '';
+    const rawData = typeof (item as any).data === 'string' ? (item as any).data : '';
+    const dataUrlMatch = rawData.match(/^data:([^;]+);base64,(.+)$/);
+    const normalizedMimeType = dataUrlMatch?.[1] ?? mimeType;
+    const normalizedData = dataUrlMatch?.[2] ?? rawData;
+
+    let binarySize = 0;
+    try {
+      binarySize = Buffer.from(normalizedData, 'base64').byteLength;
+    } catch {}
+
+    if (!normalizedMimeType.startsWith('image/') || !normalizedData || binarySize <= 0 || binarySize > MAX_IMAGE_BYTES) {
+      return null;
+    }
+
+    images.push({
+      mimeType: normalizedMimeType,
+      data: normalizedData,
+    });
+  }
+
+  return images;
+}
 
 export function createChatHandler(platform: WebPlatform) {
   return async (req: http.IncomingMessage, res: http.ServerResponse) => {
@@ -19,13 +57,20 @@ export function createChatHandler(platform: WebPlatform) {
       return;
     }
 
-    const message = body.message?.trim();
-    if (!message) {
-      sendJSON(res, 400, { error: '消息不能为空' });
+    const message = typeof body.message === 'string' ? body.message : '';
+    const images = normalizeImages(body.images);
+
+    if (images === null) {
+      sendJSON(res, 400, { error: '图片参数无效：最多支持 5 张 image/* 图片，且单张不超过 5MB' });
       return;
     }
 
-    const sessionId = body.sessionId || `web-${crypto.randomUUID()}`;
+    if (!message.trim() && images.length === 0) {
+      sendJSON(res, 400, { error: '消息和图片不能同时为空' });
+      return;
+    }
+
+    const sessionId = typeof body.sessionId === 'string' && body.sessionId ? body.sessionId : `web-${crypto.randomUUID()}`;
 
     // 并发控制：同一 session 已有请求时拒绝
     if (platform.hasPending(sessionId)) {
@@ -58,7 +103,7 @@ export function createChatHandler(platform: WebPlatform) {
 
     try {
       // 触发消息处理（Orchestrator 会通过 sendMessage/sendMessageStream 回调写入 SSE）
-      await platform.dispatchMessage(sessionId, message);
+      await platform.dispatchMessage(sessionId, message, images);
       // 发送完成事件
       if (!res.writableEnded) {
         res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);

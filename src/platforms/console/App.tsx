@@ -12,6 +12,8 @@ import { ToolInvocation } from '../../types';
 import { SessionMeta } from '../../storage/base';
 import { MessageItem, ChatMessage, MessagePart } from './components/MessageItem';
 import { InputBar } from './components/InputBar';
+import { SettingsView } from './components/SettingsView';
+import { ConsoleSettingsSaveResult, ConsoleSettingsSnapshot } from './settings';
 
 let _msgIdCounter =0;
 function nextMsgId() {
@@ -115,15 +117,17 @@ interface AppProps {
   onLoadSession: (id: string) => Promise<void>;
   onListSessions: () => Promise<SessionMeta[]>;
   onRunCommand: (cmd: string) => { output: string; cwd: string };
+  onLoadSettings: () => Promise<ConsoleSettingsSnapshot>;
+  onSaveSettings: (snapshot: ConsoleSettingsSnapshot) => Promise<ConsoleSettingsSaveResult>;
   onExit: () => void;
   modeName?: string;
   contextWindow?: number;
 }
 
 /** 视图模式 */
-type ViewMode = 'chat' | 'session-list';
+type ViewMode = 'chat' | 'session-list' | 'settings';
 
-export function App({ onReady, onSubmit, onNewSession, onLoadSession, onListSessions, onRunCommand, onExit, modeName, contextWindow }: AppProps) {
+export function App({ onReady, onSubmit, onNewSession, onLoadSession, onListSessions, onRunCommand, onLoadSettings, onSaveSettings, onExit, modeName, contextWindow }: AppProps) {
   const [messages, setMessages] =useState<ChatMessage[]>([]);
   const [streamingParts, setStreamingParts] = useState<MessagePart[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -133,6 +137,7 @@ export function App({ onReady, onSubmit, onNewSession, onLoadSession, onListSess
   const [viewMode, setViewMode] = useState<ViewMode>('chat');
   const [sessionList, setSessionList] = useState<SessionMeta[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [settingsInitialSection, setSettingsInitialSection] = useState<'general' | 'mcp'>('general');
   const { stdout } = useStdout();
 
   const streamPartsRef = useRef<MessagePart[]>([]);
@@ -143,7 +148,7 @@ export function App({ onReady, onSubmit, onNewSession, onLoadSession, onListSess
     setGeneratingTime(0);
     if (generatingTimerRef.current) clearInterval(generatingTimerRef.current);
     generatingTimerRef.current = setInterval(() => {
-      setGeneratingTime(t => +(t + 0.1).toFixed(1));
+      setGeneratingTime((t: number) => +(t + 0.1).toFixed(1));
     }, 100);
   }, []);
 
@@ -162,10 +167,10 @@ export function App({ onReady, onSubmit, onNewSession, onLoadSession, onListSess
       addMessage(role, content, meta?) {
         const textPart: MessagePart = { type: 'text', text: content };
         if (role === 'assistant') {
-          setMessages(prev => appendAssistantParts(prev, [textPart], meta));
+          setMessages((prev: ChatMessage[]) => appendAssistantParts(prev, [textPart], meta));
           return;
         }
-        setMessages(prev => {
+        setMessages((prev: ChatMessage[]) => {
           return [...prev, { id: nextMsgId(), role, parts: [textPart], ...meta }];
         });
       },
@@ -174,10 +179,10 @@ export function App({ onReady, onSubmit, onNewSession, onLoadSession, onListSess
         const normalizedParts = mergeMessageParts(parts);
         if (normalizedParts.length === 0) return;
         if (role === 'assistant') {
-          setMessages(prev => appendAssistantParts(prev, normalizedParts, meta));
+          setMessages((prev: ChatMessage[]) => appendAssistantParts(prev, normalizedParts, meta));
           return;
         }
-        setMessages(prev => [...prev, { id: nextMsgId(), role, parts: normalizedParts, ...meta }]);
+        setMessages((prev: ChatMessage[]) => [...prev, { id: nextMsgId(), role, parts: normalizedParts, ...meta }]);
       },
 
       startStream() {
@@ -212,7 +217,7 @@ export function App({ onReady, onSubmit, onNewSession, onLoadSession, onListSess
         const parts = [...streamPartsRef.current];
         if (parts.length > 0) {
           pendingCommittedStreamPartsRef.current = parts.length;
-          setMessages(prev => appendAssistantParts(prev, parts));
+          setMessages((prev: ChatMessage[]) => appendAssistantParts(prev, parts));
         } else {
           pendingCommittedStreamPartsRef.current = 0;
         }
@@ -222,7 +227,7 @@ export function App({ onReady, onSubmit, onNewSession, onLoadSession, onListSess
 
       finalizeAssistantParts(parts, meta?) {
         const normalizedParts = mergeMessageParts(parts);
-        setMessages(prev => {
+        setMessages((prev: ChatMessage[]) => {
           if (normalizedParts.length === 0) return prev;
           if (prev.length === 0) return [{ id: nextMsgId(), role: 'assistant', parts: normalizedParts, ...meta }];
           const last = prev[prev.length - 1];
@@ -241,7 +246,7 @@ export function App({ onReady, onSubmit, onNewSession, onLoadSession, onListSess
       setToolInvocations(invocations) {
         const copy = [...invocations];
         toolInvocationsRef.current = copy;
-        setMessages(prev => {
+        setMessages((prev: ChatMessage[]) => {
           if (prev.length === 0) return prev;
           const last = prev[prev.length - 1];
           if (last.role !== 'assistant') return prev;
@@ -280,7 +285,7 @@ export function App({ onReady, onSubmit, onNewSession, onLoadSession, onListSess
 
       finalizeResponse(durationMs: number) {
         const usage = lastUsageRef.current;
-        setMessages(prev => {
+        setMessages((prev: ChatMessage[]) => {
           if (prev.length === 0) return prev;
           const last = prev[prev.length - 1];
           if (last.role !== 'assistant') return prev;
@@ -320,15 +325,20 @@ export function App({ onReady, onSubmit, onNewSession, onLoadSession, onListSess
       });
       return;
     }
+    if (text === '/settings' || text === '/mcp') {
+      setSettingsInitialSection(text === '/mcp' ? 'mcp' : 'general');
+      setViewMode('settings');
+      return;
+    }
     if (text.startsWith('/sh ') || text === '/sh') {
       const cmd = text.slice(4).trim();
       if (!cmd) return;
       try {
         const result = onRunCommand(cmd);
         const display = result.output || '(无输出)';
-        setMessages(prev => [...prev, { id: nextMsgId(), role: 'assistant' as const, parts: [{ type: 'text' as const, text: display }] }]);
+        setMessages((prev: ChatMessage[]) => [...prev, { id: nextMsgId(), role: 'assistant' as const, parts: [{ type: 'text' as const, text: display }] }]);
       } catch (err: any) {
-        setMessages(prev => [...prev, { id: nextMsgId(), role: 'assistant' as const, parts: [{ type: 'text' as const, text: `执行失败: ${err.message}` }] }]);
+        setMessages((prev: ChatMessage[]) => [...prev, { id: nextMsgId(), role: 'assistant' as const, parts: [{ type: 'text' as const, text: `执行失败: ${err.message}` }] }]);
       }
       return;
     }
@@ -337,12 +347,15 @@ export function App({ onReady, onSubmit, onNewSession, onLoadSession, onListSess
 
   // ============ 键盘输入 ============
 
-  useInput((input, key) => {
+  useInput((input: string, key: any) => {
+    if (viewMode === 'settings') {
+      return;
+    }
     if (viewMode === 'session-list') {
       if (key.upArrow) {
-        setSelectedIndex(prev => Math.max(0, prev - 1));
+        setSelectedIndex((prev: number) => Math.max(0, prev - 1));
       } else if (key.downArrow) {
-        setSelectedIndex(prev => Math.min(sessionList.length - 1, prev + 1));
+        setSelectedIndex((prev: number) => Math.min(sessionList.length - 1, prev + 1));
       } else if (key.return) {
         const selected =sessionList[selectedIndex];
         if (selected) {
@@ -363,6 +376,19 @@ export function App({ onReady, onSubmit, onNewSession, onLoadSession, onListSess
 
   const termWidth = stdout?.columns ?? 80;
 
+  // ============ 设置视图 ============
+
+  if (viewMode === 'settings') {
+    return (
+      <SettingsView
+        initialSection={settingsInitialSection}
+        onBack={() => setViewMode('chat')}
+        onLoad={onLoadSettings}
+        onSave={onSaveSettings}
+      />
+    );
+  }
+
   // ============ 会话列表视图 ============
 
   if (viewMode === 'session-list') {
@@ -380,7 +406,7 @@ export function App({ onReady, onSubmit, onNewSession, onLoadSession, onListSess
         {sessionList.length === 0 && (
           <Text dimColor>  暂无历史对话</Text>
         )}
-        {sessionList.map((meta, i) => {
+        {sessionList.map((meta: SessionMeta, i: number) => {
           const isSelected = i === selectedIndex;
           const time = new Date(meta.updatedAt).toLocaleString('zh-CN');
           return (
@@ -422,7 +448,7 @@ export function App({ onReady, onSubmit, onNewSession, onLoadSession, onListSess
 
       {/* 已完成内容 */}
       <Box flexDirection="column">
-        {staticMessages.map(msg => (
+        {staticMessages.map((msg: ChatMessage) => (
           <Box key={msg.id} marginBottom={1}>
             <MessageItem msg={msg} />
           </Box>
