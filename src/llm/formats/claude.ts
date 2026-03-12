@@ -37,17 +37,18 @@ export class ClaudeFormat implements FormatAdapter {
       if (content.role === 'model') {
         const contentBlocks: Record<string, unknown>[] = [];
 
+        // 思考部分 (Claude Thinking) — 必须在 text 之前
+        const thoughtPart = content.parts.find(p => (p as any).thought && (p as any).thoughtSignatures?.claude);
+        if (thoughtPart) {
+          const sig = (thoughtPart as any).thoughtSignatures.claude;
+          const thinkingText = (thoughtPart as any).text || '';
+          contentBlocks.push({ type: 'thinking', thinking: thinkingText, signature: sig });
+        }
+
         // 文本部分
         for (const part of textParts) {
           if (!isTextPart(part)) continue;
           if (part.text) contentBlocks.push({ type: 'text', text: part.text });
-        }
-
-        // 思考部分 (Claude 3.7 Thinking)
-        const thoughtPart = content.parts.find(p => (p as any).thought && (p as any).thoughtSignatures?.claude);
-        if (thoughtPart) {
-          const sig = (thoughtPart as any).thoughtSignatures.claude;
-          contentBlocks.push({ type: 'thought', thought: sig });
         }
 
         // 工具调用部分
@@ -139,7 +140,7 @@ export class ClaudeFormat implements FormatAdapter {
 
     // generationConfig 转换（Claude 要求必填 max_tokens）
     const gc = request.generationConfig;
-    body.max_tokens = gc?.maxOutputTokens ?? 4096;
+    body.max_tokens = gc?.maxOutputTokens ?? 16000;
     if (gc?.temperature !== undefined) body.temperature = gc.temperature;
     if (gc?.topP !== undefined) body.top_p = gc.topP;
     if (gc?.topK !== undefined) body.top_k = gc.topK;
@@ -164,10 +165,12 @@ export class ClaudeFormat implements FormatAdapter {
           parts.push({
             functionCall: { name: block.name, args: block.input },
           });
-        } else if (block.type === 'thought') {
+        } else if (block.type === 'thinking') {
+          // Claude thinking block: { type: "thinking", thinking: "思考文本", signature: "签名" }
           parts.push({
+            text: block.thinking || '',
             thought: true,
-            thoughtSignatures: { claude: block.thought }
+            thoughtSignatures: { claude: block.signature },
           });
         }
       }
@@ -215,19 +218,30 @@ export class ClaudeFormat implements FormatAdapter {
             name: data.content_block.name,
             arguments: '',
           };
+        } else if (data.content_block?.type === 'thinking') {
+          // 标记进入 thinking block
+          st.inThinkingBlock = true;
         }
         break;
 
       case 'content_block_delta':
         if (data.delta?.type === 'text_delta') {
           chunk.textDelta = data.delta.text;
-        } else if (data.delta?.type === 'thought_delta') {
+        } else if (data.delta?.type === 'thinking_delta') {
+          // Claude thinking 流式文本：delta.thinking 包含可读的思考文本
+          chunk.partsDelta = [{
+            text: data.delta.thinking || '',
+            thought: true,
+          } as any];
+        } else if (data.delta?.type === 'signature_delta') {
+          // Claude thinking 签名：在 thinking block 结束前发送
+          // 仅存签名，不含文本，用于多轮回传
           chunk.partsDelta = [{
             thought: true,
-            thoughtSignatures: { claude: data.delta.thought }
+            thoughtSignatures: { claude: data.delta.signature },
           } as any];
           if (!chunk.thoughtSignatures) chunk.thoughtSignatures = {};
-          chunk.thoughtSignatures.claude = data.delta.thought;
+          chunk.thoughtSignatures.claude = data.delta.signature;
         } else if (data.delta?.type === 'input_json_delta') {
           if (st.currentToolUse) {
             st.currentToolUse.arguments += data.delta.partial_json;
@@ -246,6 +260,9 @@ export class ClaudeFormat implements FormatAdapter {
             },
           });
           st.currentToolUse = null;
+        }
+        if (st.inThinkingBlock) {
+          st.inThinkingBlock = false;
         }
         break;
 
@@ -278,6 +295,7 @@ export class ClaudeFormat implements FormatAdapter {
       currentToolUse: null,
       pendingFunctionCalls: [],
       inputTokens: 0,
+      inThinkingBlock: false,
     } as ClaudeStreamState;
   }
 }
@@ -287,6 +305,7 @@ interface ClaudeStreamState extends StreamDecodeState {
   pendingFunctionCalls: FunctionCallPart[];
   inputTokens: number;
   cacheReadInputTokens?: number;
+  inThinkingBlock: boolean;
 }
 
 function mapStopReason(reason: string | undefined): string {
